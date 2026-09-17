@@ -29,9 +29,10 @@ import { ThemeToggle } from '../ThemeToggle';
 
 interface DashboardLayoutProps {
   onBackToLanding: () => void;
+  onLogout: () => void;
 }
 
-export const DashboardLayout: React.FC<DashboardLayoutProps> = ({ onBackToLanding }) => {
+export const DashboardLayout: React.FC<DashboardLayoutProps> = ({ onBackToLanding, onLogout }) => {
   const { 
     activeTab, 
     setActiveTab, 
@@ -137,6 +138,16 @@ export const DashboardLayout: React.FC<DashboardLayoutProps> = ({ onBackToLandin
           >
             <span>Landing Page</span>
             <ExternalLink className="w-3.5 h-3.5 text-[#a488ff]" />
+          </button>
+
+          {/* Sign Out button */}
+          <button
+            onClick={onLogout}
+            className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-[#181a33] hover:bg-[#2c1a2e] text-xs font-semibold text-[#8f96b9] hover:text-red-300 border border-[#282b52] hover:border-red-500/40 transition-colors cursor-pointer"
+            title="Sign out"
+          >
+            <span>Sign Out</span>
+            <LogOut className="w-3.5 h-3.5" />
           </button>
 
           {/* User Profile Pill */}
@@ -285,7 +296,7 @@ export const DashboardLayout: React.FC<DashboardLayoutProps> = ({ onBackToLandin
                 <ThemeToggle showLabel />
               </div>
 
-              <div className="pt-2">
+              <div className="pt-2 space-y-2">
                 <button
                   onClick={() => {
                     setMobileMenuOpen(false);
@@ -295,6 +306,16 @@ export const DashboardLayout: React.FC<DashboardLayoutProps> = ({ onBackToLandin
                 >
                   <ExternalLink className="w-3.5 h-3.5 text-[#a488ff]" />
                   <span>Return to Public Landing Page</span>
+                </button>
+                <button
+                  onClick={() => {
+                    setMobileMenuOpen(false);
+                    onLogout();
+                  }}
+                  className="w-full py-2.5 rounded-xl bg-[#181a33] text-xs font-semibold text-red-300 flex items-center justify-center gap-2"
+                >
+                  <LogOut className="w-3.5 h-3.5" />
+                  <span>Sign Out</span>
                 </button>
               </div>
             </div>

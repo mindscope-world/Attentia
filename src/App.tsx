@@ -18,9 +18,11 @@ import { LegalModal } from './components/LegalModal';
 import { CheckCircle2, Sparkles, X, ArrowRight } from 'lucide-react';
 import { DashboardProvider } from './context/DashboardContext';
 import { ThemeProvider } from './context/ThemeContext';
+import { useAuth } from './context/AuthContext';
 import { DashboardLayout } from './components/dashboard/DashboardLayout';
 
 export default function App() {
+  const { isAuthenticated, logout } = useAuth();
   const [viewMode, setViewMode] = useState<'landing' | 'dashboard'>('landing');
   const [authModalOpen, setAuthModalOpen] = useState(false);
   const [authMode, setAuthMode] = useState<'login' | 'register'>('register');
@@ -36,6 +38,21 @@ export default function App() {
     setAuthMode(mode);
     setSelectedTier(defaultTier);
     setAuthModalOpen(true);
+  };
+
+  // Dashboard access requires an active session; unauthenticated attempts
+  // are redirected into the login flow instead of switching views.
+  const handleRequestDashboard = () => {
+    if (isAuthenticated) {
+      setViewMode('dashboard');
+    } else {
+      handleOpenAuth('login');
+    }
+  };
+
+  const handleLogout = () => {
+    logout();
+    setViewMode('landing');
   };
 
   const handleScrollTo = (id: string) => {
@@ -64,8 +81,8 @@ export default function App() {
   return (
     <ThemeProvider>
       <DashboardProvider>
-        {viewMode === 'dashboard' ? (
-          <DashboardLayout onBackToLanding={() => setViewMode('landing')} />
+        {viewMode === 'dashboard' && isAuthenticated ? (
+          <DashboardLayout onBackToLanding={() => setViewMode('landing')} onLogout={handleLogout} />
         ) : (
           <div className="min-h-screen bg-[#0b0c16] text-[#e2e4f0] selection:bg-[#7c5cfc]/30 selection:text-[#d3c9ff] flex flex-col font-sans transition-colors duration-200">
             {/* Toast Notification Banner */}
@@ -95,10 +112,10 @@ export default function App() {
           )}
 
           {/* Sticky Header Navbar */}
-          <Navbar 
-            onOpenAuth={handleOpenAuth} 
-            onScrollTo={handleScrollTo} 
-            onEnterDashboard={() => setViewMode('dashboard')}
+          <Navbar
+            onOpenAuth={handleOpenAuth}
+            onScrollTo={handleScrollTo}
+            onEnterDashboard={handleRequestDashboard}
           />
 
           {/* Main Content Area */}
@@ -131,8 +148,8 @@ export default function App() {
             <AdInteractionSection />
 
             {/* 6. Dashboard Preview (Authenticated Experience) */}
-            <DashboardPreviewSection 
-              onOpenFullDashboard={() => setViewMode('dashboard')} 
+            <DashboardPreviewSection
+              onOpenFullDashboard={handleRequestDashboard}
             />
 
             {/* 7. Referral System Visual Network Tree & Rules */}
