@@ -1,0 +1,202 @@
+@import "tailwindcss";
+
+@layer base {
+  body {
+    font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+    background-color: #0b0c16;
+    color: #e2e4f0;
+    transition: background-color 0.25s ease, color 0.25s ease;
+  }
+}
+
+.font-display {
+  font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+  letter-spacing: -0.03em;
+}
+
+/* Custom subtle scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+}
+::-webkit-scrollbar-track {
+  background: #0b0c16;
+}
+::-webkit-scrollbar-thumb {
+  background: #252844;
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #3c4068;
+}
+
+/* ==========================================================================
+   LIGHT THEME SYSTEM OVERRIDES (when data-theme="light")
+   ========================================================================== */
+
+[data-theme="light"],
+[data-theme="light"] body {
+  background-color: #f8fafc !important;
+  color: #1e293b !important;
+}
+
+/* Scrollbar in light theme */
+[data-theme="light"] ::-webkit-scrollbar-track {
+  background: #f1f5f9 !important;
+}
+[data-theme="light"] ::-webkit-scrollbar-thumb {
+  background: #cbd5e1 !important;
+}
+[data-theme="light"] ::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8 !important;
+}
+
+/* Primary canvas backgrounds */
+[data-theme="light"] .bg-\[\#0b0c16\],
+[data-theme="light"] .bg-\[\#090a16\],
+[data-theme="light"] .bg-\[\#0c0d1b\],
+[data-theme="light"] .bg-\[\#0d0e1b\],
+[data-theme="light"] .bg-\[\#070810\] {
+  background-color: #f8fafc !important;
+}
+
+/* Translucent headers and navigation bars */
+[data-theme="light"] .bg-\[\#0c0d1e\]\/90,
+[data-theme="light"] .bg-\[\#0b0c16\]\/90,
+[data-theme="light"] .bg-\[\#0b0c16\]\/95,
+[data-theme="light"] .bg-\[\#0b0c16\]\/80 {
+  background-color: rgba(255, 255, 255, 0.92) !important;
+  border-color: #e2e8f0 !important;
+}
+
+/* Card surfaces & panels */
+[data-theme="light"] .bg-\[\#101224\],
+[data-theme="light"] .bg-\[\#111224\],
+[data-theme="light"] .bg-\[\#121326\],
+[data-theme="light"] .bg-\[\#12142a\],
+[data-theme="light"] .bg-\[\#131424\],
+[data-theme="light"] .bg-\[\#141528\],
+[data-theme="light"] .bg-\[\#161832\],
+[data-theme="light"] .bg-\[\#181a38\],
+[data-theme="light"] .bg-\[\#151730\],
+[data-theme="light"] .bg-\[\#15162a\],
+[data-theme="light"] .bg-\[\#16172e\] {
+  background-color: #ffffff !important;
+  box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.05), 0 1px 2px -1px rgba(0, 0, 0, 0.05) !important;
+}
+
+/* Secondary muted surfaces, pills & inner panels */
+[data-theme="light"] .bg-\[\#171933\],
+[data-theme="light"] .bg-\[\#181a33\],
+[data-theme="light"] .bg-\[\#1b1d38\],
+[data-theme="light"] .bg-\[\#1c183d\],
+[data-theme="light"] .bg-\[\#1e203c\],
+[data-theme="light"] .bg-\[\#20223f\],
+[data-theme="light"] .bg-\[\#222442\],
+[data-theme="light"] .bg-\[\#0f1020\],
+[data-theme="light"] .bg-\[\#111222\] {
+  background-color: #f1f5f9 !important;
+}
+
+/* Borders */
+[data-theme="light"] .border-\[\#1f223f\],
+[data-theme="light"] .border-\[\#202341\],
+[data-theme="light"] .border-\[\#222443\],
+[data-theme="light"] .border-\[\#232543\],
+[data-theme="light"] .border-\[\#232646\],
+[data-theme="light"] .border-\[\#242542\],
+[data-theme="light"] .border-\[\#252748\],
+[data-theme="light"] .border-\[\#262a50\],
+[data-theme="light"] .border-\[\#272b53\],
+[data-theme="light"] .border-\[\#282b52\],
+[data-theme="light"] .border-\[\#2a2c47\],
+[data-theme="light"] .border-\[\#2a2d52\],
+[data-theme="light"] .border-\[\#2d3056\],
+[data-theme="light"] .border-\[\#323661\],
+[data-theme="light"] .border-\[\#383363\],
+[data-theme="light"] .border-\[\#3f317e\],
+[data-theme="light"] .border-\[\#3e347d\],
+[data-theme="light"] .border-\[\#353966\] {
+  border-color: #e2e8f0 !important;
+}
+
+/* Headings and primary text */
+[data-theme="light"] h1,
+[data-theme="light"] h2,
+[data-theme="light"] h3,
+[data-theme="light"] h4,
+[data-theme="light"] h5 {
+  color: #0f172a !important;
+}
+
+/* General high contrast text */
+[data-theme="light"] .text-\[\#e2e4f0\],
+[data-theme="light"] .text-\[\#c4c9e2\],
+[data-theme="light"] .text-\[\#c7cbdf\],
+[data-theme="light"] .text-\[\#d2d6ee\],
+[data-theme="light"] .text-\[\#b6bfe3\] {
+  color: #1e293b !important;
+}
+
+/* Muted secondary labels & helper text */
+[data-theme="light"] .text-\[\#a4abcb\],
+[data-theme="light"] .text-\[\#a0a5be\],
+[data-theme="light"] .text-\[\#8e96b8\],
+[data-theme="light"] .text-\[\#848ba8\],
+[data-theme="light"] .text-\[\#8f96b7\],
+[data-theme="light"] .text-\[\#8f96b9\],
+[data-theme="light"] .text-\[\#71789c\],
+[data-theme="light"] .text-\[\#7b81a4\],
+[data-theme="light"] .text-\[\#787f9f\],
+[data-theme="light"] .text-\[\#8a91b4\],
+[data-theme="light"] .text-\[\#7981a5\],
+[data-theme="light"] .text-\[\#6b7294\],
+[data-theme="light"] .text-\[\#6e7497\] {
+  color: #64748b !important;
+}
+
+/* White text conversion for standard card content (while protecting buttons & badges) */
+[data-theme="light"] span.text-white:not([class*="badge"]):not([class*="pill"]),
+[data-theme="light"] p.text-white,
+[data-theme="light"] div.text-white:not([class*="bg-gradient"]):not([class*="bg-\[#6b45f6\]"]):not([class*="bg-\[#7c5cfc\]"]) {
+  color: #0f172a;
+}
+
+/* Keep white text explicitly white on CTA buttons, brand badges, and gradients */
+[data-theme="light"] .text-white.keep-white,
+[data-theme="light"] button[class*="bg-gradient"] *,
+[data-theme="light"] button[class*="from-[#6b"] *,
+[data-theme="light"] button[class*="from-[#7c"] *,
+[data-theme="light"] button.bg-\[\#7c5cfc\],
+[data-theme="light"] button.bg-\[\#7c5cfc\] *,
+[data-theme="light"] .bg-\[\#6b45f6\] *,
+[data-theme="light"] [class*="bg-gradient-to-"] span.text-white,
+[data-theme="light"] [class*="bg-emerald-"] span.text-white,
+[data-theme="light"] [class*="bg-rose-"] span.text-white {
+  color: #ffffff !important;
+}
+
+/* Form inputs in light theme */
+[data-theme="light"] input:not([type="checkbox"]):not([type="radio"]),
+[data-theme="light"] select,
+[data-theme="light"] textarea {
+  background-color: #ffffff !important;
+  color: #0f172a !important;
+  border-color: #cbd5e1 !important;
+}
+
+[data-theme="light"] input:focus,
+[data-theme="light"] select:focus,
+[data-theme="light"] textarea:focus {
+  border-color: #7c5cfc !important;
+  box-shadow: 0 0 0 1px #7c5cfc !important;
+}
+
+/* Modal dialog surfaces */
+[data-theme="light"] .fixed .bg-\[\#111224\],
+[data-theme="light"] .fixed .bg-\[\#121326\],
+[data-theme="light"] .fixed .bg-\[\#101224\] {
+  background-color: #ffffff !important;
+  border-color: #e2e8f0 !important;
+  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.2) !important;
+}
+

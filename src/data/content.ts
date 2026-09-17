@@ -1,0 +1,188 @@
+import { PackageTier, ActivityItem, FaqItem, StepItem } from '../types';
+
+export const PACKAGE_TIERS: PackageTier[] = [
+  {
+    id: 'starter',
+    name: 'Starter',
+    price: 25,
+    tagline: 'Basic access to daily verified sponsor campaigns',
+    activitiesPerDay: 5,
+    rewardPerActivity: 'Up to $0.40 / task',
+    referralRewardTier: 'Tier 1 (3%)',
+    minWithdrawal: 10,
+    platformFee: '2.0%',
+    cycleDuration: '30 days',
+    eligibility: 'Open to all verified registrations',
+    features: [
+      '5 sponsored activities per day',
+      'Basic sponsored surveys & ads',
+      'Standard referral tracking (Tier 1)',
+      'Minimum withdrawal threshold: $10.00',
+      'Standard batch processing (within 24h)',
+      'USDT (TRC20 / ERC20) payouts',
+    ],
+  },
+  {
+    id: 'growth',
+    name: 'Growth',
+    price: 100,
+    popular: true,
+    badge: 'Most Popular',
+    tagline: 'Extended daily volume with multi-tier referral distribution',
+    activitiesPerDay: 15,
+    rewardPerActivity: 'Up to $0.65 / task',
+    referralRewardTier: 'Tier 1 (5%) + Tier 2 (2%)',
+    minWithdrawal: 25,
+    platformFee: '1.5%',
+    cycleDuration: '45 days',
+    eligibility: 'Completed phone/2FA verification',
+    features: [
+      '15 sponsored activities per day',
+      'Priority high-yield ad campaigns',
+      'Two-tier referral rewards (5% / 2%)',
+      'Minimum withdrawal threshold: $25.00',
+      'Accelerated batch processing (within 12h)',
+      'Enhanced analytics & activity audit log',
+    ],
+  },
+  {
+    id: 'pro',
+    name: 'Pro',
+    price: 500,
+    badge: 'Enterprise Access',
+    tagline: 'Premium daily access, maximum activity limit, and lowest fees',
+    activitiesPerDay: 30,
+    rewardPerActivity: 'Up to $0.90 / task',
+    referralRewardTier: 'Tier 1 (7%) + Tier 2 (3%) + Tier 3 (1%)',
+    minWithdrawal: 50,
+    platformFee: '1.0%',
+    cycleDuration: '60 days',
+    eligibility: 'KYC verified identity + 2FA',
+    features: [
+      '30 sponsored activities per day',
+      'Exclusive premium brand campaigns',
+      'Three-tier referral network system',
+      'Minimum withdrawal threshold: $50.00',
+      'Priority automated processing (within 1-4h)',
+      'Lowest transaction & withdrawal fee (1.0%)',
+      'Dedicated account support manager',
+    ],
+  },
+];
+
+export const HOW_IT_WORKS_STEPS: StepItem[] = [
+  {
+    number: '01',
+    title: 'Create an account',
+    description: 'Register and access your personal dashboard in under 60 seconds.',
+    details: 'Verify your email and activate two-factor authentication for bank-grade account security.',
+    badge: 'Instant Setup',
+  },
+  {
+    number: '02',
+    title: 'Choose a package',
+    description: 'Select an available participation tier and review its requirements.',
+    details: 'Evaluate activity quotas, platform fees, duration terms, and withdrawal minimums with zero hidden surprises.',
+    badge: 'Transparent Terms',
+  },
+  {
+    number: '03',
+    title: 'Engage with content',
+    description: 'View sponsored content and submit the required interaction or rating.',
+    details: 'Review high-fidelity brand creatives and answer concise relevance feedback questions to qualify task completion.',
+    badge: 'Interactive Tasks',
+  },
+  {
+    number: '04',
+    title: 'Track your rewards',
+    description: 'Your dashboard records completed activities, account balance, referrals, and eligible withdrawals.',
+    details: 'Real-time ledger updates reflecting exact earnings, active tasks, and instant automated payout eligibility.',
+    badge: 'Real-time Ledger',
+  },
+];
+
+export const INITIAL_ACTIVITY_LOG: ActivityItem[] = [
+  {
+    id: 'act-1',
+    title: 'Advertisement completed — CloudScale AI',
+    time: '4 mins ago',
+    amount: '+$2.50',
+    type: 'ad',
+    status: 'completed',
+  },
+  {
+    id: 'act-2',
+    title: 'Advertisement completed — Apex Pay FinTech',
+    time: '18 mins ago',
+    amount: '+$1.50',
+    type: 'ad',
+    status: 'completed',
+  },
+  {
+    id: 'act-3',
+    title: 'Referral activity — User 0x93...aF completed tier 1 task',
+    time: '1 hour ago',
+    amount: '+$5.00',
+    type: 'referral',
+    status: 'completed',
+  },
+  {
+    id: 'act-4',
+    title: 'Withdrawal request — USDT TRC-20 dispatch',
+    time: '2 hours ago',
+    amount: '-$35.00',
+    type: 'withdrawal',
+    status: 'processing',
+  },
+  {
+    id: 'act-5',
+    title: 'Advertisement completed — Lumina Health',
+    time: '3 hours ago',
+    amount: '+$3.50',
+    type: 'ad',
+    status: 'completed',
+  },
+];
+
+export const FAQ_LIST: FaqItem[] = [
+  {
+    category: 'Platform & Rewards',
+    question: 'What is the platform?',
+    answer: 'Attentia is a modern attention-rewards marketing platform that bridges premium digital advertisers with verified active consumers. Advertisers fund reward pools to receive genuine human attention, ratings, and qualitative feedback on digital campaigns, with micro-rewards distributed directly to participants upon task verification.',
+  },
+  {
+    category: 'Platform & Rewards',
+    question: 'How do rewards work?',
+    answer: 'Each participation package grants a specific daily quota of sponsored content interactions. When you watch an ad creative and submit a rating or qualitative evaluation, our verification engine checks completion metrics and credits your account balance in real-time according to that campaign’s reward rate.',
+  },
+  {
+    category: 'Platform & Rewards',
+    question: 'Are rewards guaranteed?',
+    answer: 'No. Rewards are strictly non-guaranteed and are contingent upon active, compliant completion of valid sponsor tasks. We never offer fixed return on investment (ROI) or passive interest. Your balance reflects exclusively the verified tasks completed within platform quality parameters.',
+  },
+  {
+    category: 'Deposits & Withdrawals',
+    question: 'How do deposits work?',
+    answer: 'Deposits fund your participation package entry tier. When you choose a package (Starter $25, Growth $100, Pro $500), our system generates a unique blockchain deposit address supporting USDT (TRC-20 and ERC-20) or USDC (Polygon). Once the specified network confirms the transaction (typically 12 block confirmations), your package status is instantly credited.',
+  },
+  {
+    category: 'Deposits & Withdrawals',
+    question: 'When can I withdraw?',
+    answer: 'You can request a withdrawal at any time once your available balance meets the package minimum threshold ($10 for Starter, $25 for Growth, $50 for Pro). There are no lockup restrictions on eligible earned reward balances, subject to standard anti-fraud security checks and 2FA authentication.',
+  },
+  {
+    category: 'Deposits & Withdrawals',
+    question: 'Are there fees?',
+    answer: 'Yes, platform withdrawal processing fees are fully transparent: 2.0% for Starter, 1.5% for Growth, and 1.0% for Pro. In addition, standard external blockchain gas fees apply when transmitting funds over TRC-20, ERC-20, or Polygon networks.',
+  },
+  {
+    category: 'Deposits & Withdrawals',
+    question: 'What happens if my transaction is pending?',
+    answer: 'Blockchain transactions require decentralized validator confirmations. For TRC-20, confirmation usually takes 1 to 3 minutes. For Ethereum ERC-20, it may take 5 to 15 minutes depending on gas congestion. Our deposit tracker updates your status in real-time as blocks confirm.',
+  },
+  {
+    category: 'Referrals',
+    question: 'How does the referral system work?',
+    answer: 'Attentia offers an activity-based multi-tier referral tree. When invitees you register complete sponsored activities, you receive a transparent commission (e.g., Tier 1: 5%, Tier 2: 2% on Growth). Referral rewards derive solely from genuine ad engagement, not merely from user signups.',
+  },
+];

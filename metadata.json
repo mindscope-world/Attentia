@@ -1,0 +1,6 @@
+{
+  "name": "Attentia - Attention Rewards Platform",
+  "description": "Turn your attention into rewards. Engage with sponsored content, complete simple interactions, and track rewards from one secure dashboard.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
