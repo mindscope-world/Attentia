@@ -1,10 +1,13 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Pause, Play } from 'lucide-react';
+import { Volume2, VolumeX } from 'lucide-react';
 
 // Minimal typings for the YouTube IFrame Player API (https://developers.google.com/youtube/iframe_api_reference).
 interface YTPlayer {
   playVideo(): void;
   pauseVideo(): void;
+  mute(): void;
+  unMute(): void;
+  getPlayerState(): number;
   getCurrentTime(): number;
   getDuration(): number;
   destroy(): void;
@@ -63,16 +66,20 @@ function loadYouTubeApi(): Promise<YTNamespace> {
 
 export type PlaybackEventType = 'play' | 'pause' | 'progress' | 'seek' | 'ended' | 'hidden' | 'visible';
 
+/** Ads play for at most this long; anything past it is cut. */
+export const AD_MAX_SECONDS = 30;
+/** Minimum viewing before the host should unlock the review (the player itself just reports time). */
+export const AD_MIN_SECONDS = 29;
+
 interface YouTubeAdPlayerProps {
   videoId: string;
-  /** Seconds of genuine viewing needed before the task can be submitted. */
-  requiredSeconds: number;
   onWatchedChange?: (watchedSeconds: number) => void;
   /** Same event vocabulary as POST /interactions/{id}/events, for server-side verification. */
   onPlaybackEvent?: (type: PlaybackEventType, position: number) => void;
 }
 
-const POLL_MS = 500;
+const POLL_MS = 250;
+const AUTOPLAY_CHECK_MS = 1500;
 const TOLERANCE_S = 1.5; // mirrors CLOCK_TOLERANCE_S in the verification service
 
 const YT_ERRORS: Record<number, string> = {
@@ -84,19 +91,20 @@ const YT_ERRORS: Record<number, string> = {
 };
 
 /**
- * Embedded YouTube ad player. Native controls are hidden so participants cannot scrub ahead;
- * watched time only accrues for real forward playback, and playback pauses when the tab is hidden.
+ * Embedded YouTube ad player. It starts on its own, cannot be paused or scrubbed by the viewer, and
+ * is cut at AD_MAX_SECONDS. Watched time only accrues for real forward playback. Playback pauses
+ * while the tab is hidden (so time can't be farmed in the background) and resumes when it returns.
  */
 export const YouTubeAdPlayer: React.FC<YouTubeAdPlayerProps> = ({
   videoId,
-  requiredSeconds,
   onWatchedChange,
   onPlaybackEvent,
 }) => {
   const mountRef = useRef<HTMLDivElement>(null);
   const playerRef = useRef<YTPlayer | null>(null);
   const [ready, setReady] = useState(false);
-  const [playing, setPlaying] = useState(false);
+  const [muted, setMuted] = useState(false);
+  const [finished, setFinished] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [watched, setWatched] = useState(0);
 
@@ -107,9 +115,11 @@ export const YouTubeAdPlayer: React.FC<YouTubeAdPlayerProps> = ({
   useEffect(() => {
     let cancelled = false;
     let poll: ReturnType<typeof setInterval> | undefined;
+    let autoplayCheck: ReturnType<typeof setTimeout> | undefined;
     let lastPos = 0;
     let lastTick = 0;
     let total = 0;
+    let done = false;
     const emit = (type: PlaybackEventType, pos: number) => cbRef.current.onPlaybackEvent?.(type, pos);
 
     const stopPolling = () => {
@@ -124,13 +134,32 @@ export const YouTubeAdPlayer: React.FC<YouTubeAdPlayerProps> = ({
       const advance = pos - lastPos;
       const elapsed = (now - lastTick) / 1000;
       if (advance > 0 && advance <= elapsed + TOLERANCE_S) {
-        total += advance;
+        total = Math.min(AD_MAX_SECONDS, total + advance);
         setWatched(total);
         cbRef.current.onWatchedChange?.(total);
       }
       lastPos = pos;
       lastTick = now;
       emit('progress', pos);
+      if (pos >= AD_MAX_SECONDS || total >= AD_MAX_SECONDS) finish(pos);
+    };
+
+    // Cut the ad: stop playback for good once the cap is reached or the video ends.
+    const finish = (pos: number) => {
+      if (done) return;
+      done = true;
+      stopPolling();
+      playerRef.current?.pauseVideo();
+      // The poll misses the first fraction of a second after playback starts. If viewing was
+      // continuous up to the cut, credit it in full so the ad counts as completely watched.
+      const reached = Math.min(pos, AD_MAX_SECONDS);
+      if (total < reached && total >= reached - TOLERANCE_S) {
+        total = reached;
+        setWatched(total);
+        cbRef.current.onWatchedChange?.(total);
+      }
+      setFinished(true);
+      emit('ended', pos);
     };
 
     const onVisibility = () => {
@@ -141,6 +170,7 @@ export const YouTubeAdPlayer: React.FC<YouTubeAdPlayerProps> = ({
         p.pauseVideo();
       } else {
         emit('visible', p.getCurrentTime() || 0);
+        if (!done) p.playVideo();
       }
     };
     document.addEventListener('visibilitychange', onVisibility);
@@ -154,6 +184,9 @@ export const YouTubeAdPlayer: React.FC<YouTubeAdPlayerProps> = ({
           width: '100%',
           height: '100%',
           playerVars: {
+            autoplay: 1,
+            start: 0,
+            end: AD_MAX_SECONDS,
             controls: 0,
             disablekb: 1,
             fs: 0,
@@ -164,21 +197,41 @@ export const YouTubeAdPlayer: React.FC<YouTubeAdPlayerProps> = ({
             origin: window.location.origin,
           },
           events: {
-            onReady: () => !cancelled && setReady(true),
+            onReady: (e) => {
+              if (cancelled) return;
+              setReady(true);
+              e.target.playVideo();
+              // Browsers block autoplay with sound unless the page has enough user engagement.
+              // If the unmuted start was refused, start muted; the viewer can unmute.
+              autoplayCheck = setTimeout(() => {
+                const p = playerRef.current;
+                if (!p || done || p.getPlayerState() === YT.PlayerState.PLAYING) return;
+                p.mute();
+                setMuted(true);
+                p.playVideo();
+              }, AUTOPLAY_CHECK_MS);
+            },
             onError: (e) => setError(YT_ERRORS[e.data] ?? 'The video could not be played.'),
             onStateChange: (e) => {
               const pos = e.target.getCurrentTime() || 0;
+              if (done) {
+                if (e.data === YT.PlayerState.PLAYING) e.target.pauseVideo();
+                return;
+              }
               if (e.data === YT.PlayerState.PLAYING) {
-                setPlaying(true);
                 lastPos = pos;
                 lastTick = performance.now();
                 emit('play', pos);
                 if (!poll) poll = setInterval(tick, POLL_MS);
-              } else if (e.data === YT.PlayerState.PAUSED || e.data === YT.PlayerState.ENDED) {
+              } else if (e.data === YT.PlayerState.ENDED) {
+                tick();
+                finish(pos);
+              } else if (e.data === YT.PlayerState.PAUSED) {
                 tick();
                 stopPolling();
-                setPlaying(false);
-                emit(e.data === YT.PlayerState.ENDED ? 'ended' : 'pause', pos);
+                emit('pause', pos);
+                // Viewers can't pause ads: resume right away unless the tab is in the background.
+                if (!done && !document.hidden) e.target.playVideo();
               }
             },
           },
@@ -189,20 +242,22 @@ export const YouTubeAdPlayer: React.FC<YouTubeAdPlayerProps> = ({
     return () => {
       cancelled = true;
       stopPolling();
+      if (autoplayCheck) clearTimeout(autoplayCheck);
       document.removeEventListener('visibilitychange', onVisibility);
       playerRef.current?.destroy();
       playerRef.current = null;
     };
   }, [videoId]);
 
-  const togglePlay = () => {
+  const toggleMute = () => {
     const p = playerRef.current;
     if (!p) return;
-    if (playing) p.pauseVideo();
-    else p.playVideo();
+    if (muted) p.unMute();
+    else p.mute();
+    setMuted(!muted);
   };
 
-  const pct = Math.min(100, (watched / Math.max(1, requiredSeconds)) * 100);
+  const pct = Math.min(100, (watched / AD_MAX_SECONDS) * 100);
 
   return (
     <div className="space-y-2">
@@ -211,6 +266,13 @@ export const YouTubeAdPlayer: React.FC<YouTubeAdPlayerProps> = ({
         <div className="absolute inset-0">
           <div ref={mountRef} className="w-full h-full" />
         </div>
+        {/* Swallows clicks so the viewer can't pause the video or open YouTube links. */}
+        <div className="absolute inset-0" aria-hidden="true" />
+        {finished && !error && (
+          <div className="absolute inset-0 flex items-center justify-center bg-black/80 text-xs font-semibold text-emerald-300">
+            Ad complete
+          </div>
+        )}
         {error && (
           <div className="absolute inset-0 flex items-center justify-center p-4 bg-black/90 text-xs text-rose-300 text-center">
             {error}
@@ -221,12 +283,12 @@ export const YouTubeAdPlayer: React.FC<YouTubeAdPlayerProps> = ({
       <div className="flex items-center gap-3">
         <button
           type="button"
-          onClick={togglePlay}
-          disabled={!ready || !!error}
+          onClick={toggleMute}
+          disabled={!ready || !!error || finished}
           className="shrink-0 w-8 h-8 rounded-full bg-[#201c44] border border-[#3f317e] flex items-center justify-center text-[#c7b4fd] hover:text-white disabled:opacity-40 cursor-pointer disabled:cursor-not-allowed"
-          aria-label={playing ? 'Pause ad' : 'Play ad'}
+          aria-label={muted ? 'Unmute ad' : 'Mute ad'}
         >
-          {playing ? <Pause className="w-3.5 h-3.5" /> : <Play className="w-3.5 h-3.5 fill-current" />}
+          {muted ? <VolumeX className="w-3.5 h-3.5" /> : <Volume2 className="w-3.5 h-3.5" />}
         </button>
         <div className="flex-1">
           <div className="h-1.5 rounded-full bg-[#1d203a] overflow-hidden">
@@ -234,7 +296,7 @@ export const YouTubeAdPlayer: React.FC<YouTubeAdPlayerProps> = ({
           </div>
         </div>
         <span className="shrink-0 text-[11px] font-mono text-[#a488ff]">
-          {Math.min(Math.floor(watched), requiredSeconds)}s / {requiredSeconds}s
+          {Math.min(Math.floor(watched), AD_MAX_SECONDS)}s / {AD_MAX_SECONDS}s
         </span>
       </div>
     </div>
