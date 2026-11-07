@@ -18,7 +18,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   onClose,
   onSuccess,
 }) => {
-  const { login } = useAuth();
+  const { login, register } = useAuth();
   const [mode, setMode] = useState<'login' | 'register'>(initialMode);
   const [selectedTier, setSelectedTier] = useState<'starter' | 'growth' | 'pro'>(defaultTier);
   const [email, setEmail] = useState('');
@@ -31,32 +31,31 @@ export const AuthModal: React.FC<AuthModalProps> = ({
 
   if (!isOpen) return null;
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMessage(null);
     setIsSubmitting(true);
+    const result = mode === 'register' ? await register(email, password) : await login(email, password);
+    setIsSubmitting(false);
+
+    if (!result.success) {
+      setErrorMessage(result.message ?? 'Invalid username/email or password.');
+      return;
+    }
+
+    setSuccessNotice(true);
     setTimeout(() => {
-      const result = login(email, password);
-      setIsSubmitting(false);
-
-      if (!result.success) {
-        setErrorMessage(result.message ?? 'Invalid username/email or password.');
-        return;
-      }
-
-      setSuccessNotice(true);
-      setTimeout(() => {
-        onSuccess(result.user?.email ?? email, selectedTier);
-        onClose();
-        setSuccessNotice(false);
-      }, 1000);
-    }, 700);
+      onSuccess(result.user?.email ?? email, selectedTier);
+      onClose();
+      setSuccessNotice(false);
+    }, 1000);
   };
 
+  // Development seed account (backend/app/seed.py). Hidden in production builds.
   const handleDemoFill = () => {
-    setEmail('admin@gmail.com');
-    setPassword('qwerty1life');
-    setReferralCode('ATTENTIA-ALPHA');
+    setMode('login');
+    setEmail('demo');
+    setPassword('demo-password');
   };
 
   return (
@@ -144,15 +143,15 @@ export const AuthModal: React.FC<AuthModalProps> = ({
 
           <div>
             <label className="text-xs font-semibold text-[#8f96b9] block mb-1">
-              Username or Gmail Address:
+              {mode === 'register' ? 'Email Address:' : 'Username or Email Address:'}
             </label>
             <div className="relative">
               <Mail className="w-4 h-4 text-[#5e6587] absolute left-3 top-1/2 -translate-y-1/2" />
               <input
-                type="text"
+                type={mode === 'register' ? 'email' : 'text'}
                 required
-                autoComplete="username"
-                placeholder="admin or admin@gmail.com"
+                autoComplete={mode === 'register' ? 'email' : 'username'}
+                placeholder={mode === 'register' ? 'you@example.com' : 'username or you@example.com'}
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 className="w-full bg-[#0b0c16] border border-[#242747] rounded-xl py-2.5 pl-9 pr-3 text-white text-xs focus:border-[#7c5cfc] outline-none placeholder:text-[#4d5371]"
@@ -169,7 +168,8 @@ export const AuthModal: React.FC<AuthModalProps> = ({
               <input
                 type="password"
                 required
-                autoComplete="current-password"
+                autoComplete={mode === 'register' ? 'new-password' : 'current-password'}
+                minLength={mode === 'register' ? 8 : undefined}
                 placeholder="••••••••••••"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
@@ -236,13 +236,15 @@ export const AuthModal: React.FC<AuthModalProps> = ({
 
         {/* Demo Quick Button */}
         <div className="mt-4 pt-4 border-t border-[#1c1e36] flex items-center justify-between">
-          <button
-            type="button"
-            onClick={handleDemoFill}
-            className="text-[11px] text-[#9b80ff] hover:underline"
-          >
-            Fill Demo Credentials
-          </button>
+          {import.meta.env.DEV ? (
+            <button
+              type="button"
+              onClick={handleDemoFill}
+              className="text-[11px] text-[#9b80ff] hover:underline"
+            >
+              Fill Demo Credentials
+            </button>
+          ) : <span />}
           <span className="text-[11px] text-[#61688b]">256-bit TLS Encrypted</span>
         </div>
       </div>

@@ -1,74 +1,63 @@
-import React, { createContext, useContext, useState } from 'react';
+import React, { createContext, useContext, useEffect, useState } from 'react';
+import { ApiError, ApiUser, authApi, tokenStore } from '../lib/api';
 
-// Hardcoded demo credentials. This app has no backend, so authentication
-// is enforced entirely on the client against this single account.
-const ADMIN_USERNAME = 'admin';
-const ADMIN_EMAIL = 'admin@gmail.com';
-const ADMIN_PASSWORD = 'qwerty1life';
+// Authentication is handled by the backend (JWT). The token is kept in localStorage and
+// validated against /users/me on load.
 
-const AUTH_STORAGE_KEY = 'attentia_auth_session';
-
-interface AuthUser {
-  username: string;
-  email: string;
-}
-
-interface LoginResult {
+interface AuthResult {
   success: boolean;
-  user?: AuthUser;
+  user?: ApiUser;
   message?: string;
 }
 
 interface AuthContextType {
   isAuthenticated: boolean;
-  user: AuthUser | null;
-  login: (identifier: string, password: string) => LoginResult;
+  isLoading: boolean;
+  user: ApiUser | null;
+  login: (identifier: string, password: string) => Promise<AuthResult>;
+  register: (email: string, password: string) => Promise<AuthResult>;
   logout: () => void;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-const readStoredUser = (): AuthUser | null => {
+const toResult = async (call: () => Promise<{ access_token: string; user: ApiUser }>, setUser: (u: ApiUser) => void) => {
   try {
-    const raw = localStorage.getItem(AUTH_STORAGE_KEY);
-    return raw ? (JSON.parse(raw) as AuthUser) : null;
-  } catch {
-    return null;
+    const res = await call();
+    tokenStore.set(res.access_token);
+    setUser(res.user);
+    return { success: true, user: res.user };
+  } catch (e) {
+    return { success: false, message: e instanceof ApiError ? e.message : 'Something went wrong.' };
   }
 };
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [user, setUser] = useState<AuthUser | null>(readStoredUser);
+  const [user, setUser] = useState<ApiUser | null>(null);
+  const [isLoading, setIsLoading] = useState<boolean>(() => !!tokenStore.get());
 
-  const login = (identifierRaw: string, password: string): LoginResult => {
-    const identifier = identifierRaw.trim().toLowerCase();
-    const isKnownIdentity = identifier === ADMIN_USERNAME || identifier === ADMIN_EMAIL;
+  useEffect(() => {
+    if (!tokenStore.get()) return;
+    authApi
+      .me()
+      .then(setUser)
+      .catch(() => tokenStore.set(null))
+      .finally(() => setIsLoading(false));
+  }, []);
 
-    if (!isKnownIdentity || password !== ADMIN_PASSWORD) {
-      return { success: false, message: 'Invalid username/email or password.' };
-    }
+  const login = (identifier: string, password: string) =>
+    toResult(() => authApi.login(identifier.trim(), password), setUser);
 
-    const authUser: AuthUser = { username: ADMIN_USERNAME, email: ADMIN_EMAIL };
-    setUser(authUser);
-    try {
-      localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(authUser));
-    } catch {
-      // Ignore storage failures (private browsing, storage disabled, etc.)
-    }
-    return { success: true, user: authUser };
-  };
+  const register = (email: string, password: string) =>
+    toResult(() => authApi.register(email.trim(), password), setUser);
 
   const logout = () => {
+    tokenStore.set(null);
     setUser(null);
-    try {
-      localStorage.removeItem(AUTH_STORAGE_KEY);
-    } catch {
-      // Ignore storage failures.
-    }
   };
 
   return (
-    <AuthContext.Provider value={{ isAuthenticated: !!user, user, login, logout }}>
+    <AuthContext.Provider value={{ isAuthenticated: !!user, isLoading, user, login, register, logout }}>
       {children}
     </AuthContext.Provider>
   );
