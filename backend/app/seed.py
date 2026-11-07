@@ -7,7 +7,7 @@ import secrets
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 
 import app.models  # noqa: F401
 from app.core.config import settings
@@ -68,7 +68,7 @@ def run() -> None:
         s.flush()
 
         def ensure_user(email, username, password, role, kyc):
-            u = s.scalar(select(User).where(User.email == email))
+            u = s.scalar(select(User).where(or_(User.email == email, User.username == username)))
             if u is None:
                 u = User(email=email, username=username, password_hash=hash_password(password), role=role,
                          kyc_status=kyc, full_name=username.title())
@@ -86,7 +86,9 @@ def run() -> None:
             return
 
         admin_password = settings.seed_admin_password
-        if not admin_password and not s.scalar(select(User.id).where(User.email == settings.seed_admin_email)):
+        admin_exists = s.scalar(select(User.id).where(
+            or_(User.email == settings.seed_admin_email, User.username == settings.seed_admin_username)))
+        if not admin_password and not admin_exists:
             admin_password = secrets.token_urlsafe(12)
             print(f"Generated dev admin password for {settings.seed_admin_email}: {admin_password}")
         if admin_password:

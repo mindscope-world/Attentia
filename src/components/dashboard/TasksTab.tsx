@@ -15,7 +15,10 @@ import {
 } from 'lucide-react';
 import { useDashboard } from '../../context/DashboardContext';
 import { DashboardTask } from '../../types';
-import { YouTubeAdPlayer } from '../YouTubeAdPlayer';
+import { AD_MIN_SECONDS, YouTubeAdPlayer } from '../YouTubeAdPlayer';
+
+// Video ads play for at most AD_MAX_SECONDS and unlock the review after AD_MIN_SECONDS.
+const requiredViewing = (task: DashboardTask) => (task.youtubeId ? AD_MIN_SECONDS : task.durationSeconds || 10);
 
 export const TasksTab: React.FC = () => {
   const { 
@@ -51,7 +54,7 @@ export const TasksTab: React.FC = () => {
   // Timer effect when modal opens
   useEffect(() => {
     if (activeModalTask) {
-      setCountdown(activeModalTask.durationSeconds || 10);
+      setCountdown(requiredViewing(activeModalTask));
       setTimerFinished(false);
       setSelectedOption('');
       setSelectedRating(5);
@@ -83,9 +86,12 @@ export const TasksTab: React.FC = () => {
 
   const handleWatchedChange = (watched: number) => {
     if (!activeModalTask) return;
-    const required = activeModalTask.durationSeconds || 10;
+    const required = requiredViewing(activeModalTask);
     setCountdown(Math.max(0, Math.ceil(required - watched)));
-    if (watched >= required) setTimerFinished(true);
+    if (watched >= required) {
+      setTimerFinished(true);
+      setErrorMsg(null);
+    }
   };
 
   const handleSubmitTask = () => {
@@ -94,7 +100,7 @@ export const TasksTab: React.FC = () => {
       setErrorMsg('Please finish watching the required part of the video before submitting.');
       return;
     }
-    if (!selectedOption) {
+    if (!activeModalTask.youtubeId && !selectedOption) {
       setErrorMsg('Please select an option to submit your verification.');
       return;
     }
@@ -299,7 +305,6 @@ export const TasksTab: React.FC = () => {
                 <YouTubeAdPlayer
                   key={activeModalTask.id}
                   videoId={activeModalTask.youtubeId}
-                  requiredSeconds={activeModalTask.durationSeconds || 10}
                   onWatchedChange={handleWatchedChange}
                 />
               )}
@@ -318,7 +323,7 @@ export const TasksTab: React.FC = () => {
                       {timerFinished
                         ? 'You may now submit your review'
                         : activeModalTask.youtubeId
-                          ? 'Press play and watch the ad to unlock your review'
+                          ? 'Watch the ad to unlock your review'
                           : 'Please review the creative parameters'}
                     </span>
                   </div>
@@ -354,33 +359,35 @@ export const TasksTab: React.FC = () => {
                 </div>
               </div>
 
-              {/* Poll Question */}
-              <div>
-                <label className="text-xs font-semibold text-white block mb-2">
-                  {activeModalTask.question}
-                </label>
-                <div className="space-y-2">
-                  {activeModalTask.options.map((opt, i) => (
-                    <button
-                      key={i}
-                      type="button"
-                      onClick={() => setSelectedOption(opt)}
-                      className={`w-full text-left p-3 rounded-xl border text-xs transition-all flex items-center justify-between cursor-pointer ${
-                        selectedOption === opt
-                          ? 'bg-[#231e4e] border-[#7858fc] text-white shadow-md'
-                          : 'bg-[#0f1020] border-[#1e213d] text-[#878eaecb] hover:text-white'
-                      }`}
-                    >
-                      <span>{opt}</span>
-                      <div className={`w-4 h-4 rounded-full border flex items-center justify-center ${
-                        selectedOption === opt ? 'border-[#7858fc] bg-[#7858fc]' : 'border-gray-600'
-                      }`}>
-                        {selectedOption === opt && <Check className="w-2.5 h-2.5 text-white" />}
-                      </div>
-                    </button>
-                  ))}
+              {/* Poll question: video ads only ask for a rating */}
+              {!activeModalTask.youtubeId && (
+                <div>
+                  <label className="text-xs font-semibold text-white block mb-2">
+                    {activeModalTask.question}
+                  </label>
+                  <div className="space-y-2">
+                    {activeModalTask.options.map((opt, i) => (
+                      <button
+                        key={i}
+                        type="button"
+                        onClick={() => setSelectedOption(opt)}
+                        className={`w-full text-left p-3 rounded-xl border text-xs transition-all flex items-center justify-between cursor-pointer ${
+                          selectedOption === opt
+                            ? 'bg-[#231e4e] border-[#7858fc] text-white shadow-md'
+                            : 'bg-[#0f1020] border-[#1e213d] text-[#878eaecb] hover:text-white'
+                        }`}
+                      >
+                        <span>{opt}</span>
+                        <div className={`w-4 h-4 rounded-full border flex items-center justify-center ${
+                          selectedOption === opt ? 'border-[#7858fc] bg-[#7858fc]' : 'border-gray-600'
+                        }`}>
+                          {selectedOption === opt && <Check className="w-2.5 h-2.5 text-white" />}
+                        </div>
+                      </button>
+                    ))}
+                  </div>
                 </div>
-              </div>
+              )}
 
               {errorMsg && (
                 <div className="p-3 rounded-xl bg-rose-950/40 border border-rose-800/50 text-rose-300 text-xs flex items-center gap-2">
