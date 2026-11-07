@@ -36,7 +36,8 @@ export const TasksTab: React.FC = () => {
   // Modal interactive state
   const [countdown, setCountdown] = useState<number>(10);
   const [timerFinished, setTimerFinished] = useState<boolean>(false);
-  const [selectedRating, setSelectedRating] = useState<number>(5);
+  // 0 = not rated yet; a 1–5 star rating is required before submitting.
+  const [selectedRating, setSelectedRating] = useState<number>(0);
   const [selectedOption, setSelectedOption] = useState<string>('');
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
   const [submitSuccess, setSubmitSuccess] = useState<boolean>(false);
@@ -57,7 +58,7 @@ export const TasksTab: React.FC = () => {
       setCountdown(requiredViewing(activeModalTask));
       setTimerFinished(false);
       setSelectedOption('');
-      setSelectedRating(5);
+      setSelectedRating(0);
       setErrorMsg(null);
       setSubmitSuccess(false);
 
@@ -98,6 +99,10 @@ export const TasksTab: React.FC = () => {
     if (!activeModalTask) return;
     if (activeModalTask.youtubeId && !timerFinished) {
       setErrorMsg('Please finish watching the required part of the video before submitting.');
+      return;
+    }
+    if (selectedRating < 1 || selectedRating > 5) {
+      setErrorMsg('Please rate the ad from 1 to 5 stars before submitting.');
       return;
     }
     if (!activeModalTask.youtubeId && !selectedOption) {
@@ -336,14 +341,19 @@ export const TasksTab: React.FC = () => {
               {/* Rating Component */}
               <div>
                 <label className="text-xs font-semibold text-white block mb-1.5">
-                  {activeModalTask.ratingPrompt}
+                  {activeModalTask.ratingPrompt} <span className="text-rose-400" aria-hidden="true">*</span>
                 </label>
                 <div className="flex items-center gap-2">
                   {[1, 2, 3, 4, 5].map((star) => (
                     <button
                       key={star}
                       type="button"
-                      onClick={() => setSelectedRating(star)}
+                      onClick={() => {
+                        setSelectedRating(star);
+                        setErrorMsg(null);
+                      }}
+                      aria-label={`Rate ${star} out of 5 stars`}
+                      aria-pressed={selectedRating === star}
                       className={`p-2 rounded-xl border transition-all cursor-pointer ${
                         selectedRating >= star
                           ? 'bg-[#231b4b] border-[#7d5dfc] text-amber-400'
@@ -354,7 +364,7 @@ export const TasksTab: React.FC = () => {
                     </button>
                   ))}
                   <span className="text-xs font-mono text-[#a488ff] ml-2">
-                    {selectedRating} / 5 Stars
+                    {selectedRating ? `${selectedRating} / 5 Stars` : 'Rating required'}
                   </span>
                 </div>
               </div>
