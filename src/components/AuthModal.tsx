@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
-import { X, Sparkles, ShieldCheck, Check, ArrowRight, User, Mail, Lock, Key } from 'lucide-react';
+import { X, Sparkles, ShieldCheck, Check, ArrowRight, User, Mail, Lock, Key, AlertCircle } from 'lucide-react';
 import { PACKAGE_TIERS } from '../data/content';
+import { useAuth } from '../context/AuthContext';
 
 interface AuthModalProps {
   isOpen: boolean;
@@ -17,6 +18,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   onClose,
   onSuccess,
 }) => {
+  const { login, register } = useAuth();
   const [mode, setMode] = useState<'login' | 'register'>(initialMode);
   const [selectedTier, setSelectedTier] = useState<'starter' | 'growth' | 'pro'>(defaultTier);
   const [email, setEmail] = useState('');
@@ -25,27 +27,35 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   const [agreeTerms, setAgreeTerms] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [successNotice, setSuccessNotice] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   if (!isOpen) return null;
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setErrorMessage(null);
     setIsSubmitting(true);
+    const result = mode === 'register' ? await register(email, password) : await login(email, password);
+    setIsSubmitting(false);
+
+    if (!result.success) {
+      setErrorMessage(result.message ?? 'Invalid username/email or password.');
+      return;
+    }
+
+    setSuccessNotice(true);
     setTimeout(() => {
-      setIsSubmitting(false);
-      setSuccessNotice(true);
-      setTimeout(() => {
-        onSuccess(email || 'user@attentia.app', selectedTier);
-        onClose();
-        setSuccessNotice(false);
-      }, 1000);
-    }, 700);
+      onSuccess(result.user?.email ?? email, selectedTier);
+      onClose();
+      setSuccessNotice(false);
+    }, 1000);
   };
 
+  // Development seed account (backend/app/seed.py). Hidden in production builds.
   const handleDemoFill = () => {
-    setEmail('demo.participant@attentia.app');
-    setPassword('AttentiaSecure2026!');
-    setReferralCode('ATTENTIA-ALPHA');
+    setMode('login');
+    setEmail('demo');
+    setPassword('demo-password');
   };
 
   return (
@@ -82,7 +92,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
         <div className="grid grid-cols-2 gap-1 p-1 rounded-xl bg-[#0b0c16] border border-[#212440] mb-6">
           <button
             type="button"
-            onClick={() => setMode('register')}
+            onClick={() => { setMode('register'); setErrorMessage(null); }}
             className={`py-2 text-xs font-semibold rounded-lg transition-all ${
               mode === 'register'
                 ? 'bg-[#25284e] text-white shadow-sm'
@@ -93,7 +103,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
           </button>
           <button
             type="button"
-            onClick={() => setMode('login')}
+            onClick={() => { setMode('login'); setErrorMessage(null); }}
             className={`py-2 text-xs font-semibold rounded-lg transition-all ${
               mode === 'login'
                 ? 'bg-[#25284e] text-white shadow-sm'
@@ -133,14 +143,15 @@ export const AuthModal: React.FC<AuthModalProps> = ({
 
           <div>
             <label className="text-xs font-semibold text-[#8f96b9] block mb-1">
-              Email Address:
+              {mode === 'register' ? 'Email Address:' : 'Username or Email Address:'}
             </label>
             <div className="relative">
               <Mail className="w-4 h-4 text-[#5e6587] absolute left-3 top-1/2 -translate-y-1/2" />
               <input
-                type="email"
+                type={mode === 'register' ? 'email' : 'text'}
                 required
-                placeholder="you@domain.com"
+                autoComplete={mode === 'register' ? 'email' : 'username'}
+                placeholder={mode === 'register' ? 'you@example.com' : 'username or you@example.com'}
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 className="w-full bg-[#0b0c16] border border-[#242747] rounded-xl py-2.5 pl-9 pr-3 text-white text-xs focus:border-[#7c5cfc] outline-none placeholder:text-[#4d5371]"
@@ -157,6 +168,8 @@ export const AuthModal: React.FC<AuthModalProps> = ({
               <input
                 type="password"
                 required
+                autoComplete={mode === 'register' ? 'new-password' : 'current-password'}
+                minLength={mode === 'register' ? 8 : undefined}
                 placeholder="••••••••••••"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
@@ -194,6 +207,13 @@ export const AuthModal: React.FC<AuthModalProps> = ({
             </label>
           )}
 
+          {errorMessage && (
+            <div className="flex items-center gap-2 text-xs text-red-300 bg-red-500/10 border border-red-500/30 rounded-xl px-3 py-2.5">
+              <AlertCircle className="w-4 h-4 shrink-0" />
+              <span>{errorMessage}</span>
+            </div>
+          )}
+
           <button
             type="submit"
             disabled={isSubmitting || (mode === 'register' && !agreeTerms)}
@@ -216,13 +236,15 @@ export const AuthModal: React.FC<AuthModalProps> = ({
 
         {/* Demo Quick Button */}
         <div className="mt-4 pt-4 border-t border-[#1c1e36] flex items-center justify-between">
-          <button
-            type="button"
-            onClick={handleDemoFill}
-            className="text-[11px] text-[#9b80ff] hover:underline"
-          >
-            Fill Demo Credentials
-          </button>
+          {import.meta.env.DEV ? (
+            <button
+              type="button"
+              onClick={handleDemoFill}
+              className="text-[11px] text-[#9b80ff] hover:underline"
+            >
+              Fill Demo Credentials
+            </button>
+          ) : <span />}
           <span className="text-[11px] text-[#61688b]">256-bit TLS Encrypted</span>
         </div>
       </div>

@@ -1,0 +1,9 @@
+{
+  "identities": [
+    {
+      "name": "attentia",
+      "credentials": [{ "accessKey": "attentia", "secretKey": "attentia-secret" }],
+      "actions": ["Admin", "Read", "Write", "List", "Tagging"]
+    }
+  ]
+}

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Navbar } from './components/Navbar';
 import { HeroSection } from './components/HeroSection';
 import { StatementSection } from './components/StatementSection';
@@ -18,10 +18,15 @@ import { LegalModal } from './components/LegalModal';
 import { CheckCircle2, Sparkles, X, ArrowRight } from 'lucide-react';
 import { DashboardProvider } from './context/DashboardContext';
 import { ThemeProvider } from './context/ThemeContext';
+import { useAuth } from './context/AuthContext';
 import { DashboardLayout } from './components/dashboard/DashboardLayout';
+import { Navigate, Route, Routes, useLocation, useNavigate } from 'react-router';
 
 export default function App() {
-  const [viewMode, setViewMode] = useState<'landing' | 'dashboard'>('landing');
+  const { isAuthenticated, isLoading, logout } = useAuth();
+  const navigate = useNavigate();
+  const location = useLocation();
+  const goToDashboard = () => navigate('/dashboard');
   const [authModalOpen, setAuthModalOpen] = useState(false);
   const [authMode, setAuthMode] = useState<'login' | 'register'>('register');
   const [selectedTier, setSelectedTier] = useState<'starter' | 'growth' | 'pro'>('growth');
@@ -38,6 +43,29 @@ export default function App() {
     setAuthModalOpen(true);
   };
 
+  // Dashboard access requires an active session; unauthenticated attempts
+  // are redirected into the login flow instead of switching views.
+  const handleRequestDashboard = () => {
+    if (isAuthenticated) {
+      goToDashboard();
+    } else {
+      handleOpenAuth('login');
+    }
+  };
+
+  const handleLogout = () => {
+    logout();
+    navigate('/');
+  };
+
+  // Visiting /dashboard while signed out redirects here and opens the login modal.
+  useEffect(() => {
+    if ((location.state as { requireLogin?: boolean } | null)?.requireLogin) {
+      handleOpenAuth('login');
+      navigate(location.pathname, { replace: true, state: null });
+    }
+  }, [location.state]);
+
   const handleScrollTo = (id: string) => {
     const el = document.getElementById(id);
     if (el) {
@@ -51,7 +79,7 @@ export default function App() {
       showAction: true
     });
     // Switch to authenticated dashboard
-    setViewMode('dashboard');
+    goToDashboard();
     setTimeout(() => setToastMessage(null), 6000);
   };
 
@@ -64,9 +92,20 @@ export default function App() {
   return (
     <ThemeProvider>
       <DashboardProvider>
-        {viewMode === 'dashboard' ? (
-          <DashboardLayout onBackToLanding={() => setViewMode('landing')} />
-        ) : (
+        <Routes>
+        <Route
+          path="/dashboard/:tab?"
+          element={
+            isLoading ? (
+              <div className="min-h-screen bg-[#090a16]" />
+            ) : isAuthenticated ? (
+              <DashboardLayout onBackToLanding={() => navigate('/')} onLogout={handleLogout} />
+            ) : (
+              <Navigate to="/" replace state={{ requireLogin: true }} />
+            )
+          }
+        />
+        <Route path="*" element={
           <div className="min-h-screen bg-[#0b0c16] text-[#e2e4f0] selection:bg-[#7c5cfc]/30 selection:text-[#d3c9ff] flex flex-col font-sans transition-colors duration-200">
             {/* Toast Notification Banner */}
           {toastMessage && (
@@ -77,7 +116,7 @@ export default function App() {
                 <p className="text-[#a4abcb] mb-2">{toastMessage.text}</p>
                 {toastMessage.showAction && (
                   <button
-                    onClick={() => setViewMode('dashboard')}
+                    onClick={goToDashboard}
                     className="inline-flex items-center gap-1 text-[11px] font-bold text-[#c7b4fd] hover:text-white underline cursor-pointer"
                   >
                     <span>Go to Dashboard</span>
@@ -95,10 +134,10 @@ export default function App() {
           )}
 
           {/* Sticky Header Navbar */}
-          <Navbar 
-            onOpenAuth={handleOpenAuth} 
-            onScrollTo={handleScrollTo} 
-            onEnterDashboard={() => setViewMode('dashboard')}
+          <Navbar
+            onOpenAuth={handleOpenAuth}
+            onScrollTo={handleScrollTo}
+            onEnterDashboard={handleRequestDashboard}
           />
 
           {/* Main Content Area */}
@@ -131,8 +170,8 @@ export default function App() {
             <AdInteractionSection />
 
             {/* 6. Dashboard Preview (Authenticated Experience) */}
-            <DashboardPreviewSection 
-              onOpenFullDashboard={() => setViewMode('dashboard')} 
+            <DashboardPreviewSection
+              onOpenFullDashboard={handleRequestDashboard}
             />
 
             {/* 7. Referral System Visual Network Tree & Rules */}
@@ -170,7 +209,8 @@ export default function App() {
             onClose={() => setLegalModalOpen(false)}
           />
         </div>
-      )}
+        } />
+        </Routes>
       </DashboardProvider>
     </ThemeProvider>
   );

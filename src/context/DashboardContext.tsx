@@ -1,4 +1,5 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
+import { useLocation, useNavigate } from 'react-router';
 import { 
   DashboardTab, 
   UserProfile, 
@@ -62,6 +63,7 @@ const INITIAL_TASKS: DashboardTask[] = [
     reward: 0.50,
     durationSeconds: 15,
     description: 'Evaluate the 15-second sponsor spotlight for Apex Protocol zero-slippage FX conversion.',
+    youtubeId: 'aqz-KE-bpKQ',
     ratingPrompt: 'How clear was the zero-slippage fee value proposition?',
     question: 'Which network feature was highlighted in the creative?',
     options: ['Sub-second settlement on TRON & Polygon', 'Decentralized Proof-of-Work mining', 'Manual banking wire transfers'],
@@ -114,6 +116,7 @@ const INITIAL_TASKS: DashboardTask[] = [
     reward: 0.50,
     durationSeconds: 15,
     description: 'Watch the product explainer on automated yield rebalancing across dollar stablecoins.',
+    youtubeId: 'eRsGyueVLvQ',
     ratingPrompt: 'How easy was the automated rebalancing explanation to understand?',
     question: 'What primary risk mitigation does Lumina emphasize?',
     options: ['Smart contract formal verification & dual audits', 'No stop-loss protection', 'High leverage borrowing'],
@@ -325,11 +328,18 @@ const INITIAL_REFERRALS: ReferralUser[] = [
   },
 ];
 
+const DASHBOARD_TABS: DashboardTab[] = ['overview', 'tasks', 'deposits-withdrawals', 'activities', 'network', 'settings'];
+
 const DashboardContext = createContext<DashboardContextType | undefined>(undefined);
 
 export const DashboardProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [userProfile, setUserProfile] = useState<UserProfile>(INITIAL_PROFILE);
-  const [activeTab, setActiveTab] = useState<DashboardTab>('overview');
+  // The active tab lives in the URL (/dashboard/:tab) so it survives reloads and supports deep links.
+  const location = useLocation();
+  const navigate = useNavigate();
+  const tabFromPath = location.pathname.split('/')[2] as DashboardTab | undefined;
+  const activeTab: DashboardTab = tabFromPath && DASHBOARD_TABS.includes(tabFromPath) ? tabFromPath : 'overview';
+  const setActiveTab = (tab: DashboardTab) => navigate(tab === 'overview' ? '/dashboard' : `/dashboard/${tab}`);
 
   const [availableBalance, setAvailableBalance] = useState<number>(245.80);
   const [todayEarned, setTodayEarned] = useState<number>(12.50);
