@@ -53,10 +53,11 @@ class Settings(BaseSettings):
     # Rewards
     platform_fee_pct: Decimal = Decimal("0")
 
-    # Seed accounts (development only)
-    seed_admin_email: str = "admin@gmail.com"
+    # Seed admin. Never hardcode the password: set SEED_ADMIN_PASSWORD. In development a random
+    # one is generated and printed when the admin is first created.
+    seed_admin_email: str = "admin@attentia.dev"
     seed_admin_username: str = "admin"
-    seed_admin_password: str = "qwerty1life"
+    seed_admin_password: str = ""
 
     @model_validator(mode="after")
     def _production_secrets(self):

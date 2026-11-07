@@ -3,6 +3,7 @@
     python -m app.seed
 """
 
+import secrets
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
@@ -77,15 +78,20 @@ def run() -> None:
 
         if not settings.is_dev:
             # Production: packages only, plus an admin when real credentials are supplied.
-            if settings.seed_admin_password != "qwerty1life" and len(settings.seed_admin_password) >= 12:
+            if len(settings.seed_admin_password) >= 12:
                 ensure_user(settings.seed_admin_email, settings.seed_admin_username,
                             settings.seed_admin_password, Role.admin, KycStatus.verified)
             s.commit()
             print("Seed complete (production: packages/admin only).")
             return
 
-        ensure_user(settings.seed_admin_email, settings.seed_admin_username, settings.seed_admin_password,
-                    Role.admin, KycStatus.verified)
+        admin_password = settings.seed_admin_password
+        if not admin_password and not s.scalar(select(User.id).where(User.email == settings.seed_admin_email)):
+            admin_password = secrets.token_urlsafe(12)
+            print(f"Generated dev admin password for {settings.seed_admin_email}: {admin_password}")
+        if admin_password:
+            ensure_user(settings.seed_admin_email, settings.seed_admin_username, admin_password,
+                        Role.admin, KycStatus.verified)
         participant = ensure_user("demo@attentia.dev", "demo", "demo-password", Role.participant, KycStatus.verified)
         ensure_user("advertiser@attentia.dev", "advertiser", "advertiser-password", Role.advertiser, KycStatus.verified)
 

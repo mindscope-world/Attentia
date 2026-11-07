@@ -1,10 +1,12 @@
 """Integration tests against real Postgres, Redis and S3 (docker compose up postgres redis objectstore)."""
 
 import os
+import secrets
 
 os.environ.setdefault("DATABASE_URL", "postgresql+asyncpg://attentia:attentia@localhost:25432/attentia_test")
 os.environ.setdefault("REDIS_URL", "redis://localhost:26379/5")
 os.environ.setdefault("S3_BUCKET", "attentia-test")
+os.environ.setdefault("SEED_ADMIN_PASSWORD", secrets.token_urlsafe(16))
 os.environ["ENV"] = "test"
 
 import psycopg  # noqa: E402
