@@ -406,6 +406,8 @@ export const DashboardProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   const completeTask = (taskId: string, rating: number, answer: string): boolean => {
     const task = tasks.find(t => t.id === taskId);
     if (!task || task.status === 'completed') return false;
+    // A 1–5 star rating is mandatory before a task can be claimed.
+    if (!Number.isInteger(rating) || rating < 1 || rating > 5) return false;
 
     // Mark task as completed
     setTasks(prev => prev.map(t => t.id === taskId ? { ...t, status: 'completed' } : t));
