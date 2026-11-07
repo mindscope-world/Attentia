@@ -254,50 +254,12 @@ async def test_withdrawal_requires_kyc(client):
 # ------------------------------------------------------------------ assets / ffmpeg / storage
 
 
-def _make_video(path, seconds=3, size="854x480"):
-    subprocess.run(
-        ["ffmpeg", "-y", "-v", "error", "-f", "lavfi", "-i", f"testsrc=duration={seconds}:size={size}:rate=25",
-         "-f", "lavfi", "-i", f"sine=frequency=440:duration={seconds}", "-c:v", "libx264", "-pix_fmt", "yuv420p",
-         "-c:a", "aac", str(path)],
-        check=True,
-    )
-
-
-async def test_video_upload_pipeline_and_campaign(client, admin, demo, tmp_path):
-    src = tmp_path / "ad.mp4"
-    _make_video(src, seconds=3, size="1280x960")  # 4:3, 960p -> pillarboxed 16:9 at 720p
-    with open(src, "rb") as f:
-        r = await client.post("/assets/upload", files={"file": ("ad.mp4", f, "video/mp4")}, headers=admin)
-    assert r.status_code == 201, r.text
-    asset = (await client.get(f"/assets/{r.json()['id']}", headers=admin)).json()
-    assert asset["status"] == "ready", asset
-    assert (asset["width"], asset["height"]) == (1280, 720)
-    assert 2.5 < asset["duration_seconds"] < 3.5
-
-    async with httpx.AsyncClient() as raw:
-        video = await raw.get(asset["media_url"])
-        thumb = await raw.get(asset["thumbnail_url"])
-    assert video.status_code == 200 and video.content[4:8] == b"ftyp"
-    assert thumb.status_code == 200 and thumb.content[:2] == b"\xff\xd8"
-
-    cid = await _quick_campaign(client, admin, asset_id=asset["id"], min_watch_pct=0.5)
-    item = next(i for i in (await client.get("/campaigns/feed", headers=demo)).json()["items"] if i["id"] == cid)
-    assert item["media_url"] and item["thumbnail_url"]
-
-    # Video campaigns require server-accounted watch time, not just elapsed time.
-    it = (await client.post("/interactions", json={"campaign_id": cid}, headers=demo)).json()
-    await asyncio.sleep(1.6)
-    r = await client.post(f"/interactions/{it['id']}/submit", json={"rating": 4, "answer": "A phone"}, headers=demo)
-    assert r.json()["status"] == "rejected" and r.json()["rejection_reason"].startswith("Watched 0s")
-
-
-async def test_low_resolution_video_fails(client, admin, tmp_path):
-    src = tmp_path / "small.mp4"
-    _make_video(src, seconds=1, size="320x240")
-    with open(src, "rb") as f:
-        r = await client.post("/assets/upload", files={"file": ("small.mp4", f, "video/mp4")}, headers=admin)
-    asset = (await client.get(f"/assets/{r.json()['id']}", headers=admin)).json()
-    assert asset["status"] == "failed" and "360p" in asset["error"]
+async def test_video_file_uploads_are_rejected(client, admin):
+    r = await client.post("/assets/upload", files={"file": ("ad.mp4", b"\x00" * 64, "video/mp4")}, headers=admin)
+    assert r.status_code == 415 and "YouTube" in r.json()["detail"]
+    r = await client.post("/assets/upload-url", json={"filename": "ad.webm", "content_type": "video/webm"},
+                          headers=admin)
+    assert r.status_code == 415
 
 
 
@@ -334,3 +296,74 @@ async def test_analytics(client, admin, demo):
     from app.core.cache import get_redis
 
     assert await get_redis().exists("analytics:admin")
+
+
+# ------------------------------------------------------------------ youtube creatives
+
+
+def test_youtube_id_parsing():
+    from app.modules.assets.youtube import YouTubeError, parse_iso_duration, parse_video_id
+
+    vid = "dQw4w9WgXcQ"
+    for url in (
+        vid,
+        f"https://www.youtube.com/watch?v={vid}",
+        f"https://youtube.com/watch?feature=share&v={vid}&t=10s",
+        f"https://youtu.be/{vid}?si=abc",
+        f"https://www.youtube.com/embed/{vid}",
+        f"https://www.youtube-nocookie.com/embed/{vid}",
+        f"https://youtube.com/shorts/{vid}",
+    ):
+        assert parse_video_id(url) == vid, url
+    for bad in ("https://vimeo.com/123", "not a url", "https://youtube.com/watch?v=short"):
+        try:
+            parse_video_id(bad)
+            raise AssertionError(bad)
+        except YouTubeError:
+            pass
+    assert parse_iso_duration("PT1M5S") == 65 and parse_iso_duration("PT2H") == 7200
+    assert parse_iso_duration("P0D") is None
+
+
+async def test_youtube_asset_campaign_and_watch_accounting(client, admin, demo, monkeypatch):
+    from app.modules.assets import youtube
+
+    async def fake_fetch(video_id):
+        return youtube.YouTubeVideo(video_id=video_id, title="Launch spot", duration_seconds=None)
+
+    monkeypatch.setattr(youtube, "fetch_video", fake_fetch)
+
+    r = await client.post("/assets/youtube", json={"url": "https://youtu.be/dQw4w9WgXcQ"}, headers=admin)
+    assert r.status_code == 422 and "duration_seconds" in r.text  # no API key -> duration needed
+
+    r = await client.post(
+        "/assets/youtube", json={"url": "https://youtu.be/dQw4w9WgXcQ", "duration_seconds": 2}, headers=admin
+    )
+    assert r.status_code == 201, r.text
+    asset = r.json()
+    assert asset["kind"] == "youtube" and asset["status"] == "ready" and asset["youtube_id"] == "dQw4w9WgXcQ"
+    assert asset["embed_url"] == "https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ"
+    assert asset["thumbnail_url"].startswith("https://i.ytimg.com/vi/dQw4w9WgXcQ/")
+    assert (await client.post(f"/assets/{asset['id']}/reprocess", headers=admin)).status_code == 409
+
+    cid = await _quick_campaign(client, admin, asset_id=asset["id"])
+    item = next(i for i in (await client.get("/campaigns/feed", headers=demo)).json()["items"] if i["id"] == cid)
+    assert item["media_kind"] == "youtube" and item["youtube_id"] == "dQw4w9WgXcQ"
+    assert item["embed_url"] and item["duration_seconds"] == 2
+
+    # Like native video, YouTube campaigns need server-accounted watch time from player events.
+    it = (await client.post("/interactions", json={"campaign_id": cid}, headers=demo)).json()
+    assert it["required_seconds"] == 2
+    await asyncio.sleep(2.1)
+    r = await client.post(f"/interactions/{it['id']}/events",
+                          json={"events": [{"type": "play", "position": 0}, {"type": "ended", "position": 2}]},
+                          headers=demo)
+    assert r.status_code == 200 and r.json()["watched_seconds"] == 2
+    r = await client.post(f"/interactions/{it['id']}/submit", json={"rating": 5, "answer": "A phone"}, headers=demo)
+    assert r.json()["status"] == "verified", r.json()
+
+
+async def test_youtube_asset_rejects_bad_url(client, admin):
+    r = await client.post("/assets/youtube", json={"url": "https://vimeo.com/1234", "duration_seconds": 5},
+                          headers=admin)
+    assert r.status_code == 400

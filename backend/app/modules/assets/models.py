@@ -10,6 +10,7 @@ from app.core.db import Base, IdMixin, TimestampMixin
 class AssetKind(enum.StrEnum):
     video = "video"
     image = "image"
+    youtube = "youtube"  # embedded from YouTube; not stored or processed by us
 
 
 class AssetStatus(enum.StrEnum):
@@ -41,3 +42,6 @@ class Asset(IdMixin, TimestampMixin, Base):
     height: Mapped[int | None] = mapped_column(Integer)
     size_bytes: Mapped[int | None] = mapped_column(Integer)
     error: Mapped[str | None] = mapped_column(Text)
+    # YouTube creatives
+    youtube_id: Mapped[str | None] = mapped_column(String(11), index=True)
+    title: Mapped[str | None] = mapped_column(String(300))

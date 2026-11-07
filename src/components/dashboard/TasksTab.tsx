@@ -15,6 +15,7 @@ import {
 } from 'lucide-react';
 import { useDashboard } from '../../context/DashboardContext';
 import { DashboardTask } from '../../types';
+import { YouTubeAdPlayer } from '../YouTubeAdPlayer';
 
 export const TasksTab: React.FC = () => {
   const { 
@@ -57,6 +58,9 @@ export const TasksTab: React.FC = () => {
       setErrorMsg(null);
       setSubmitSuccess(false);
 
+      // Video ads unlock on watched time reported by the player, not on a wall-clock countdown.
+      if (activeModalTask.youtubeId) return;
+
       const interval = setInterval(() => {
         setCountdown((prev) => {
           if (prev <= 1) {
@@ -77,13 +81,19 @@ export const TasksTab: React.FC = () => {
     setActiveModalTask(task);
   };
 
-  const handleSkipCountdown = () => {
-    setCountdown(0);
-    setTimerFinished(true);
+  const handleWatchedChange = (watched: number) => {
+    if (!activeModalTask) return;
+    const required = activeModalTask.durationSeconds || 10;
+    setCountdown(Math.max(0, Math.ceil(required - watched)));
+    if (watched >= required) setTimerFinished(true);
   };
 
   const handleSubmitTask = () => {
     if (!activeModalTask) return;
+    if (activeModalTask.youtubeId && !timerFinished) {
+      setErrorMsg('Please finish watching the required part of the video before submitting.');
+      return;
+    }
     if (!selectedOption) {
       setErrorMsg('Please select an option to submit your verification.');
       return;
@@ -250,7 +260,7 @@ export const TasksTab: React.FC = () => {
       {/* Interactive Task Verification Modal */}
       {activeModalTask && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/85 backdrop-blur-md animate-fade-in">
-          <div className="relative w-full max-w-xl rounded-3xl bg-[#131427] border-2 border-[#2f335b] shadow-2xl p-6 sm:p-8 text-left overflow-hidden">
+          <div className="relative w-full max-w-xl max-h-[92vh] overflow-y-auto rounded-3xl bg-[#131427] border-2 border-[#2f335b] shadow-2xl p-6 sm:p-8 text-left">
             {/* Modal Header */}
             <div className="flex items-center justify-between pb-4 border-b border-[#212443] mb-5">
               <div className="flex items-center gap-2">
@@ -285,7 +295,16 @@ export const TasksTab: React.FC = () => {
                 {activeModalTask.description}
               </p>
 
-              {/* Countdown / Video simulator visual */}
+              {activeModalTask.youtubeId && (
+                <YouTubeAdPlayer
+                  key={activeModalTask.id}
+                  videoId={activeModalTask.youtubeId}
+                  requiredSeconds={activeModalTask.durationSeconds || 10}
+                  onWatchedChange={handleWatchedChange}
+                />
+              )}
+
+              {/* Countdown / viewing status */}
               <div className="p-4 rounded-xl bg-[#141527] border border-[#26294a] flex flex-col sm:flex-row items-center justify-between gap-3">
                 <div className="flex items-center gap-2.5">
                   <div className="w-8 h-8 rounded-full bg-[#201c44] border border-[#3f317e] flex items-center justify-center text-xs font-mono font-bold text-[#c7b4fd]">
@@ -296,19 +315,14 @@ export const TasksTab: React.FC = () => {
                       {timerFinished ? 'Required viewing verified' : 'Active Engagement Countdown'}
                     </span>
                     <span className="text-[10px] text-[#71789c]">
-                      {timerFinished ? 'You may now submit your review' : 'Please review the creative parameters'}
+                      {timerFinished
+                        ? 'You may now submit your review'
+                        : activeModalTask.youtubeId
+                          ? 'Press play and watch the ad to unlock your review'
+                          : 'Please review the creative parameters'}
                     </span>
                   </div>
                 </div>
-
-                {!timerFinished && (
-                  <button
-                    onClick={handleSkipCountdown}
-                    className="text-[11px] text-[#a488ff] hover:text-white underline cursor-pointer"
-                  >
-                    Skip wait (Demo Mode)
-                  </button>
-                )}
               </div>
             </div>
 

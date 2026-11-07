@@ -14,7 +14,7 @@ from typing import Literal
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.modules.assets.models import AssetStatus
+from app.modules.assets.models import AssetKind, AssetStatus
 from app.modules.campaigns.models import Campaign
 from app.modules.campaigns.service import budget_remaining, is_live_clause, utc_today
 from app.modules.packages.models import Subscription, SubscriptionStatus
@@ -218,7 +218,10 @@ def _rejection_reason(session, it, campaign, now, rating, answer, feedback, user
     elapsed = (now - it.started_at).total_seconds()
     if elapsed + CLOCK_TOLERANCE_S < it.required_seconds:
         return f"Submitted after {elapsed:.0f}s; at least {it.required_seconds:.0f}s of viewing is required"
-    has_video = campaign.asset is not None and campaign.asset.kind == "video" and campaign.asset.media_key
+    asset = campaign.asset
+    has_video = asset is not None and (
+        (asset.kind == AssetKind.video and asset.media_key) or (asset.kind == AssetKind.youtube and asset.youtube_id)
+    )
     if has_video and it.watched_seconds + CLOCK_TOLERANCE_S < it.required_seconds:
         return f"Watched {it.watched_seconds:.0f}s of the required {it.required_seconds:.0f}s"
     if it.suspicious_events > 3:

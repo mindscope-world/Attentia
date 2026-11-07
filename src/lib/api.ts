@@ -104,3 +104,51 @@ export const authApi = {
     api.post<TokenResponse>('/auth/register', { email, password }),
   me: () => api.get<ApiUser>('/users/me'),
 };
+
+// ---- Sponsored content (campaign feed + creatives) -------------------------------------
+
+export type MediaKind = 'video' | 'image' | 'youtube';
+
+export interface ApiFeedItem {
+  id: string;
+  name: string;
+  brand: string;
+  category: string;
+  description: string;
+  is_demo: boolean;
+  reward: string;
+  duration_seconds: number | null;
+  media_kind: MediaKind | null;
+  media_url: string | null;
+  thumbnail_url: string | null;
+  /** Set for YouTube creatives: render with <YouTubeAdPlayer videoId={youtube_id} />. */
+  youtube_id: string | null;
+  embed_url: string | null;
+  min_watch_pct: number;
+  requires_feedback: boolean;
+  rating_prompt: string;
+  question: string;
+  options: string[];
+  completed_today: boolean;
+}
+
+export interface ApiAsset {
+  id: string;
+  kind: MediaKind;
+  status: 'awaiting_upload' | 'uploaded' | 'processing' | 'ready' | 'failed';
+  original_filename: string | null;
+  duration_seconds: number | null;
+  youtube_id: string | null;
+  title: string | null;
+  embed_url: string | null;
+  media_url: string | null;
+  thumbnail_url: string | null;
+  error: string | null;
+  created_at: string;
+}
+
+export const assetsApi = {
+  /** Register a YouTube video (any watch/share/embed/shorts URL) as an ad creative. */
+  addYouTube: (url: string, durationSeconds?: number) =>
+    api.post<ApiAsset>('/assets/youtube', { url, duration_seconds: durationSeconds }),
+};

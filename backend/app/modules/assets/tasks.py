@@ -31,23 +31,14 @@ def process_asset_sync(asset_id: uuid.UUID) -> AssetStatus:
                 prefix = f"assets/{asset.id}"
                 thumb = tmpdir / "thumb.jpg"
 
-                if asset.kind == AssetKind.video:
-                    out = tmpdir / "video.mp4"
-                    pipeline.transcode_video(src, out, info)
-                    out_info = pipeline.probe(out)
-                    at = min(1.0, (out_info.duration or 0) / 2)
-                    pipeline.make_thumbnail(out, thumb, at)
-                    storage.upload_file(out, f"{prefix}/video.mp4", "video/mp4")
-                    asset.media_key = f"{prefix}/video.mp4"
-                    asset.duration_seconds = out_info.duration
-                    asset.width, asset.height = out_info.width, out_info.height
-                else:
-                    out = tmpdir / "image.webp"
-                    pipeline.convert_image(src, out)
-                    pipeline.make_thumbnail(src, thumb, 0)
-                    storage.upload_file(out, f"{prefix}/image.webp", "image/webp")
-                    asset.media_key = f"{prefix}/image.webp"
-                    asset.width, asset.height = info.width, info.height
+                if asset.kind != AssetKind.image:
+                    raise pipeline.MediaError("Only image assets are processed; video ads come from YouTube")
+                out = tmpdir / "image.webp"
+                pipeline.convert_image(src, out)
+                pipeline.make_thumbnail(src, thumb, 0)
+                storage.upload_file(out, f"{prefix}/image.webp", "image/webp")
+                asset.media_key = f"{prefix}/image.webp"
+                asset.width, asset.height = info.width, info.height
 
                 storage.upload_file(thumb, f"{prefix}/thumb.jpg", "image/jpeg")
                 asset.thumbnail_key = f"{prefix}/thumb.jpg"

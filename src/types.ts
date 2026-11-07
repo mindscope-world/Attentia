@@ -35,6 +35,8 @@ export interface DashboardTask {
   durationSeconds: number;
   description: string;
   mediaUrl?: string;
+  /** YouTube video ID for embedded video ads. */
+  youtubeId?: string;
   ratingPrompt: string;
   question: string;
   options: string[];

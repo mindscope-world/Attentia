@@ -112,8 +112,11 @@ class FeedItem(BaseModel):
     is_demo: bool
     reward: Decimal
     duration_seconds: float | None
+    media_kind: str | None = None  # "video" | "image" | "youtube"
     media_url: str | None
     thumbnail_url: str | None
+    youtube_id: str | None = None
+    embed_url: str | None = None  # set for YouTube creatives; play via the IFrame player API
     min_watch_pct: float
     requires_feedback: bool
     rating_prompt: str

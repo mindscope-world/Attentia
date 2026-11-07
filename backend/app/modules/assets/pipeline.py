@@ -1,7 +1,6 @@
-"""FFmpeg processing for ad creatives.
+"""FFmpeg processing for uploaded image creatives: normalised to WebP plus a JPG thumbnail.
 
-Video target (proposal §5.2): MP4, H.264 video, AAC audio, 16:9, 360p–720p, faststart for
-progressive playback, plus a JPG thumbnail. Images are normalised to WebP + a JPG thumbnail.
+Video ads are not processed here; they are embedded from YouTube (see youtube.py).
 """
 
 import json
@@ -47,37 +46,6 @@ def probe(path: Path) -> ProbeResult:
         height=int(video["height"]),
         has_audio=any(s.get("codec_type") == "audio" for s in streams),
     )
-
-
-def target_height(src_height: int) -> int:
-    if src_height < settings.video_min_height:
-        raise MediaError(
-            f"Video resolution {src_height}p is below the {settings.video_min_height}p minimum"
-        )
-    return min(src_height, settings.video_max_height) // 2 * 2
-
-
-def transcode_video(src: Path, dst: Path, info: ProbeResult) -> None:
-    h = target_height(info.height)
-    w = h * 16 // 9 // 2 * 2
-    # Fit inside a 16:9 frame and letterbox/pillarbox the rest.
-    vf = (
-        f"scale={w}:{h}:force_original_aspect_ratio=decrease,"
-        f"pad={w}:{h}:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1,fps=30"
-    )
-    args = [settings.ffmpeg_bin, "-y", "-i", str(src)]
-    if not info.has_audio:
-        # Every output gets an AAC track so players behave consistently.
-        args += ["-f", "lavfi", "-i", "anullsrc=channel_layout=stereo:sample_rate=44100", "-shortest"]
-    args += [
-        "-map", "0:v:0", "-map", "0:a:0" if info.has_audio else "1:a:0",
-        "-vf", vf,
-        "-c:v", "libx264", "-preset", "veryfast", "-profile:v", "main", "-pix_fmt", "yuv420p", "-crf", "23",
-        "-c:a", "aac", "-b:a", "128k", "-ac", "2",
-        "-movflags", "+faststart",
-        str(dst),
-    ]
-    _run(args)
 
 
 def make_thumbnail(src: Path, dst: Path, at_seconds: float = 1.0) -> None:

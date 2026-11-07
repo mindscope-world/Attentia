@@ -39,9 +39,11 @@ class Settings(BaseSettings):
     # Media pipeline
     ffmpeg_bin: str = "ffmpeg"
     ffprobe_bin: str = "ffprobe"
-    video_min_height: int = 360
-    video_max_height: int = 720
     max_upload_mb: int = 200
+
+    # YouTube-hosted creatives. Optional: with a Data API key we read title, duration and
+    # embeddability; without one we use oEmbed and the advertiser supplies the duration.
+    youtube_api_key: str = ""
 
     # Payments
     deposit_required_confirmations: int = 12

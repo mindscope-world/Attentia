@@ -5,6 +5,7 @@ from fastapi import APIRouter, HTTPException, status
 from sqlalchemy import select
 
 from app.core import cache, storage
+from app.modules.assets import youtube
 from app.modules.assets.models import Asset, AssetStatus
 from app.modules.campaigns.models import Campaign, CampaignStatus
 from app.modules.campaigns.schemas import (
@@ -61,7 +62,9 @@ async def _load_live(session) -> list[dict]:
                 "is_demo": c.is_demo,
                 "reward": str(calculate_reward(Decimal(c.reward_rate))),
                 "duration_seconds": asset.duration_seconds if asset and asset.duration_seconds else c.display_seconds,
+                "media_kind": str(asset.kind) if asset else None,
                 "media_key": asset.media_key if asset else None,
+                "youtube_id": asset.youtube_id if asset else None,
                 "thumbnail_key": asset.thumbnail_key if asset else None,
                 "min_watch_pct": c.min_watch_pct,
                 "requires_feedback": c.requires_feedback,
@@ -88,12 +91,23 @@ async def feed(user: CurrentUser, session: DbSession) -> FeedOut:
     items = []
     for c in live:
         cid = uuid.UUID(c["id"])
+        yt = c.get("youtube_id")
+        if yt:
+            media = {
+                "media_url": youtube.watch_url(yt),
+                "thumbnail_url": youtube.thumbnail_url(yt),
+                "embed_url": youtube.embed_url(yt),
+            }
+        else:
+            media = {
+                "media_url": storage.presigned_get(c["media_key"]),
+                "thumbnail_url": storage.presigned_get(c["thumbnail_key"]),
+            }
         items.append(
             FeedItem(
                 **{k: v for k, v in c.items() if k not in ("media_key", "thumbnail_key", "id")},
+                **media,
                 id=cid,
-                media_url=storage.presigned_get(c["media_key"]),
-                thumbnail_url=storage.presigned_get(c["thumbnail_key"]),
                 completed_today=cid in done_today,
             )
         )

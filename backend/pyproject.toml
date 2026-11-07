@@ -19,6 +19,7 @@ dependencies = [
     "celery[redis]>=5.4",
     "boto3>=1.35",
     "python-multipart>=0.0.17",
+    "httpx>=0.28",
 ]
 
 [dependency-groups]

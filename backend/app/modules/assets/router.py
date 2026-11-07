@@ -8,6 +8,7 @@ from sqlalchemy import select
 
 from app.core import storage
 from app.core.config import settings
+from app.modules.assets import youtube
 from app.modules.assets.models import Asset, AssetKind, AssetStatus
 from app.modules.assets.tasks import process_asset
 from app.modules.users.deps import AdvertiserOrAdmin, DbSession
@@ -15,10 +16,8 @@ from app.modules.users.models import Role, User
 
 router = APIRouter(prefix="/assets", tags=["assets"])
 
+# Uploads are images only. Video ads come exclusively from YouTube (POST /assets/youtube).
 ALLOWED_TYPES = {
-    "video/mp4": AssetKind.video,
-    "video/quicktime": AssetKind.video,
-    "video/webm": AssetKind.video,
     "image/jpeg": AssetKind.image,
     "image/png": AssetKind.image,
     "image/webp": AssetKind.image,
@@ -40,6 +39,15 @@ class AssetOut(BaseModel):
     created_at: datetime
     media_url: str | None = None
     thumbnail_url: str | None = None
+    youtube_id: str | None = None
+    title: str | None = None
+    embed_url: str | None = None
+
+
+class YouTubeAssetIn(BaseModel):
+    url: str = Field(max_length=500, description="YouTube watch/share/embed/shorts URL, or a bare video ID")
+    # Needed when no YOUTUBE_API_KEY is configured (oEmbed does not report duration).
+    duration_seconds: float | None = Field(default=None, gt=0, le=3600)
 
 
 class UploadRequestIn(BaseModel):
@@ -56,7 +64,11 @@ class UploadRequestOut(BaseModel):
 
 def asset_out(asset: Asset) -> AssetOut:
     out = AssetOut.model_validate(asset)
-    if asset.status == AssetStatus.ready:
+    if asset.kind == AssetKind.youtube:
+        out.embed_url = youtube.embed_url(asset.youtube_id)
+        out.media_url = youtube.watch_url(asset.youtube_id)
+        out.thumbnail_url = youtube.thumbnail_url(asset.youtube_id)
+    elif asset.status == AssetStatus.ready:
         out.media_url = storage.presigned_get(asset.media_key)
         out.thumbnail_url = storage.presigned_get(asset.thumbnail_key)
     return out
@@ -65,6 +77,11 @@ def asset_out(asset: Asset) -> AssetOut:
 def _kind_for(content_type: str) -> AssetKind:
     kind = ALLOWED_TYPES.get(content_type)
     if kind is None:
+        if content_type.startswith("video/"):
+            raise HTTPException(
+                status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+                "Video files are not accepted; add video ads from YouTube via POST /assets/youtube",
+            )
         raise HTTPException(status.HTTP_415_UNSUPPORTED_MEDIA_TYPE, f"Unsupported type {content_type}")
     return kind
 
@@ -97,6 +114,37 @@ async def upload_asset(file: UploadFile, user: AdvertiserOrAdmin, session: DbSes
     session.add(asset)
     await session.commit()
     process_asset.delay(str(asset.id))
+    return asset_out(asset)
+
+
+@router.post("/youtube", response_model=AssetOut, status_code=status.HTTP_201_CREATED)
+async def add_youtube_asset(body: YouTubeAssetIn, user: AdvertiserOrAdmin, session: DbSession) -> AssetOut:
+    """Register a YouTube video as a creative. It is embedded for playback, never downloaded."""
+    try:
+        video_id = youtube.parse_video_id(body.url)
+        video = await youtube.fetch_video(video_id)
+    except youtube.YouTubeError as e:
+        raise HTTPException(e.code, str(e)) from e
+    duration = video.duration_seconds or body.duration_seconds
+    if duration is None:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            "duration_seconds is required (set YOUTUBE_API_KEY to read it from YouTube automatically)",
+        )
+    asset = Asset(
+        id=uuid.uuid4(),
+        owner_id=user.id,
+        kind=AssetKind.youtube,
+        status=AssetStatus.ready,
+        original_filename=None,
+        content_type=None,
+        original_key="",
+        youtube_id=video_id,
+        title=(video.title or "")[:300] or None,
+        duration_seconds=duration,
+    )
+    session.add(asset)
+    await session.commit()
     return asset_out(asset)
 
 
@@ -135,6 +183,8 @@ async def complete_upload(asset_id: uuid.UUID, user: AdvertiserOrAdmin, session:
 @router.post("/{asset_id}/reprocess", response_model=AssetOut)
 async def reprocess(asset_id: uuid.UUID, user: AdvertiserOrAdmin, session: DbSession) -> AssetOut:
     asset = await _get_owned(session, asset_id, user)
+    if asset.kind != AssetKind.image:
+        raise HTTPException(status.HTTP_409_CONFLICT, "Only image assets are processed")
     if asset.status in (AssetStatus.awaiting_upload, AssetStatus.processing):
         raise HTTPException(status.HTTP_409_CONFLICT, f"Asset is {asset.status}")
     asset.status = AssetStatus.uploaded
