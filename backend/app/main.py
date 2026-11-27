@@ -67,4 +67,10 @@ async def health():
     redis_ok = await cache.ping()
     s3_ok = await run_in_threadpool(storage.ping)
     ok = db_ok and redis_ok and s3_ok
-    return {"status": "ok" if ok else "degraded", "database": db_ok, "redis": redis_ok, "storage": s3_ok}
+    return {
+        "status": "ok" if ok else "degraded",
+        "database": db_ok,
+        "redis": redis_ok,
+        "storage": s3_ok,
+        "environment": settings.env,
+    }

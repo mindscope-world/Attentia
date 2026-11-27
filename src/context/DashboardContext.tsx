@@ -1,19 +1,72 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router';
-import { 
-  DashboardTab, 
-  UserProfile, 
-  DashboardTask, 
-  WithdrawalRecord, 
-  DepositRecord, 
-  ReferralUser, 
-  ActivityItem 
+import {
+  DashboardTab,
+  UserProfile,
+  DashboardTask,
+  WithdrawalRecord,
+  DepositRecord,
+  ReferralUser,
+  ActivityItem,
 } from '../types';
+import {
+  ApiBalances,
+  ApiDeposit,
+  ApiFeed,
+  ApiInteraction,
+  ApiLedgerEntry,
+  ApiNetwork,
+  ApiPackageFull,
+  ApiParticipantAnalytics,
+  ApiSubscription,
+  ApiWithdrawal,
+  ApiError,
+  PlaybackEventName,
+  analyticsApi,
+  campaignsApi,
+  interactionsApi,
+  packagesApi,
+  paymentsApi,
+  profileApi,
+  rewardsApi,
+} from '../lib/api';
+import { useAuth } from './AuthContext';
+import { REFERRAL_PREVIEW, REFERRAL_PREVIEW_BONUS } from '../data/referrals';
+
+// Everything on the participant dashboard comes from the API (/campaigns/feed, /interactions,
+// /rewards, /payments, /packages, /analytics). The server verifies tasks and credits rewards;
+// this context only presents the results. The one exception is the referral programme, which has
+// no backend yet and shows clearly separated preview data (src/data/referrals.ts).
+
+/** Ads are cut at 30 s of playback, so the dashboard shows at most that as the viewing time. */
+const MAX_VIEW_SECONDS = 30;
+
+export interface StartedTask {
+  interactionId: string;
+  /** Seconds of real viewing the server requires before the review can be submitted. */
+  requiredSeconds: number;
+}
+
+export interface SubmitResult {
+  ok: boolean;
+  message: string;
+  reward?: number;
+}
+
+interface WalletWhitelist {
+  trc20: string;
+  erc20: string;
+  polygon: string;
+}
 
 interface DashboardContextType {
   userProfile: UserProfile;
   activeTab: DashboardTab;
   setActiveTab: (tab: DashboardTab) => void;
+  isLoading: boolean;
+  loadError: string | null;
+  refresh: () => Promise<void>;
+
   availableBalance: number;
   todayEarned: number;
   pendingWithdrawal: number;
@@ -21,351 +74,77 @@ interface DashboardContextType {
   totalEarnedAllTime: number;
   completedToday: number;
   dailyTotalQuota: number;
+  /** Average reward per task across the current feed. */
   rewardPerTask: number;
+  hasActivePackage: boolean;
+  /** Withdrawal terms of the active package (0 when there is none). */
+  minWithdrawal: number;
+  withdrawalFeeRate: number;
+  dailyTrend: { day: string; tasks: number; rewards: number }[];
+
   tasks: DashboardTask[];
   activities: ActivityItem[];
   withdrawals: WithdrawalRecord[];
   deposits: DepositRecord[];
+  /** Latest deposit still waiting for payment or confirmations, if any. */
+  pendingDeposit: ApiDeposit | null;
+  packages: ApiPackageFull[];
+  /** True when the API runs in development, where deposits can be simulated. */
+  canSimulateDeposits: boolean;
+
   referrals: ReferralUser[];
   referralCode: string;
   referralLink: string;
-  completeTask: (taskId: string, rating: number, answer: string) => boolean;
-  requestWithdrawal: (amount: number, network: 'TRC-20' | 'ERC-20' | 'POLYGON', address: string) => { success: boolean; message: string };
-  submitDeposit: (amount: number, network: 'TRC-20' | 'ERC-20' | 'POLYGON', targetTier?: 'starter' | 'growth' | 'pro') => void;
-  updateUserProfile: (profile: Partial<UserProfile>) => void;
-  updateWalletWhitelist: (wallets: { trc20?: string; erc20?: string; polygon?: string }) => void;
-  toggle2FA: () => void;
+
+  startTask: (taskId: string) => Promise<StartedTask>;
+  sendPlaybackEvents: (interactionId: string, events: { type: PlaybackEventName; position: number }[]) => Promise<void>;
+  submitTask: (interactionId: string, rating: number, answer: string, feedback?: string) => Promise<SubmitResult>;
+  requestWithdrawal: (amount: number, network: ApiNetwork, address: string) => Promise<{ success: boolean; message: string }>;
+  createDeposit: (packageId: string, network: ApiNetwork) => Promise<ApiDeposit>;
+  simulateDeposit: (deposit: ApiDeposit) => Promise<void>;
+  updateUserProfile: (profile: { name: string }) => Promise<void>;
+  updateWalletWhitelist: (wallets: Partial<WalletWhitelist>) => void;
   notification: string | null;
   setNotification: (msg: string | null) => void;
 }
-
-const INITIAL_PROFILE: UserProfile = {
-  name: 'Paul M.',
-  email: 'paulmwaura254@gmail.com',
-  accountId: 'BF-88921',
-  tier: 'growth',
-  memberSince: 'March 2026',
-  kycLevel: 'Tier 2 (Verified)',
-  twoFactorEnabled: true,
-  walletWhitelist: {
-    trc20: 'TPyM8c7h4aL89QhZk2u8vX5yNmW0eR1t3p',
-    erc20: '0x7A4b9e28D5b4C17983FcAf86c7104d4D8A92F4c8',
-    polygon: '0x3D88f219Cb0e14a7904EcB589d1b64c010A56E21',
-  },
-};
-
-const INITIAL_TASKS: DashboardTask[] = [
-  {
-    id: 'task-01',
-    title: "Big Buck Bunny — Official Blender Short Film",
-    sponsor: 'Blender',
-    category: 'Video Engagement',
-    reward: 0.50,
-    durationSeconds: 30,
-    description: "Blender Foundation's open-movie short: a giant, gentle rabbit wakes in a sunny meadow and later turns the tables on three rodents who bully the forest's creatures.",
-    youtubeId: 'aqz-KE-bpKQ',
-    ratingPrompt: "How well did the opening scenes set the mood of the story?",
-    question: "Who is the main character of Big Buck Bunny?",
-    options: ["A large, good-natured rabbit", "A baby dragon", "A secret agent"],
-    status: 'available',
-  },
-  {
-    id: 'task-02',
-    title: "Sintel — Open Movie by the Blender Foundation",
-    sponsor: 'Blender',
-    category: 'Video Engagement',
-    reward: 0.50,
-    durationSeconds: 30,
-    description: "A fantasy short about Sintel, a lone young woman crossing snowy mountains and dangerous lands in search of the baby dragon she raised.",
-    youtubeId: 'eRsGyueVLvQ',
-    ratingPrompt: "How engaging was the opening of Sintel?",
-    question: "What is Sintel searching for?",
-    options: ["Her baby dragon", "A lost llama", "A hidden barbershop"],
-    status: 'available',
-  },
-  {
-    id: 'task-03',
-    title: "Tears of Steel — Blender VFX Open Movie",
-    sponsor: 'Blender',
-    category: 'Video Engagement',
-    reward: 0.50,
-    durationSeconds: 30,
-    description: "A live-action sci-fi short shot in Amsterdam, where a group of scientists and warriors try to save the world from destructive robots, combining real footage with Blender visual effects.",
-    youtubeId: 'R6MlUcmOul8',
-    ratingPrompt: "How convincing were the visual effects in Tears of Steel?",
-    question: "What kind of film is Tears of Steel?",
-    options: ["Live-action sci-fi with visual effects", "A hand-drawn cartoon", "A nature documentary"],
-    status: 'available',
-  },
-  {
-    id: 'task-04',
-    title: "Elephants Dream — The First Blender Open Movie",
-    sponsor: 'Blender',
-    category: 'Video Engagement',
-    reward: 0.50,
-    durationSeconds: 30,
-    description: "The Blender Foundation's first open movie (2006): Proog guides the young Emo through a strange, surreal world of machines and endless rooms.",
-    youtubeId: 'TLkA0RELQ1g',
-    ratingPrompt: "How striking did you find the surreal world of Elephants Dream?",
-    question: "Where does Elephants Dream take place?",
-    options: ["A surreal mechanical world", "A snowy mountain village", "Modern-day Amsterdam"],
-    status: 'available',
-  },
-  {
-    id: 'task-05',
-    title: "Spring — Blender Open Movie",
-    sponsor: 'Blender Studio',
-    category: 'Video Engagement',
-    reward: 0.50,
-    durationSeconds: 30,
-    description: "Blender Studio's short about a shepherd girl and her dog who face ancient spirits in order to continue the cycle of life.",
-    youtubeId: 'WhWc3b3KhnY',
-    ratingPrompt: "How beautiful did you find the animation in Spring?",
-    question: "Who are the main characters of Spring?",
-    options: ["A shepherd girl and her dog", "Two llamas", "A rabbit and three rodents"],
-    status: 'available',
-  },
-  {
-    id: 'task-06',
-    title: "Agent 327: Operation Barbershop",
-    sponsor: 'Blender Studio',
-    category: 'Video Engagement',
-    reward: 0.50,
-    durationSeconds: 30,
-    description: "An animated spy-action teaser from Blender Studio, based on the classic Dutch comics: Agent 327 goes undercover in a barbershop that hides a secret.",
-    youtubeId: 'mN0zPOpADL4',
-    ratingPrompt: "How exciting was the action in Agent 327?",
-    question: "Where does Agent 327 go undercover?",
-    options: ["A barbershop", "A space station", "A farm in Patagonia"],
-    status: 'available',
-  },
-  {
-    id: 'task-07',
-    title: "Caminandes 3: Llamigos",
-    sponsor: 'Blender',
-    category: 'Video Engagement',
-    reward: 0.50,
-    durationSeconds: 30,
-    description: "Koro the llama returns in a comedy short set in Patagonia, competing with a mischievous penguin over a tree full of berries.",
-    youtubeId: 'SkVqJ1SGeL0',
-    ratingPrompt: "How funny did you find Caminandes 3: Llamigos?",
-    question: "Which animal competes with Koro the llama?",
-    options: ["A penguin", "A dragon", "An elephant"],
-    status: 'available',
-  },
-  {
-    id: 'task-08',
-    title: "Caminandes 2: Gran Dillama",
-    sponsor: 'Blender',
-    category: 'Video Engagement',
-    reward: 0.50,
-    durationSeconds: 30,
-    description: "In this Blender comedy short, Koro the llama tries everything to get past an electric fence to the greener grass on the other side.",
-    youtubeId: 'Z4C82eyhwgU',
-    ratingPrompt: "How entertaining was Koro's struggle with the fence?",
-    question: "What stands in Koro's way in Gran Dillama?",
-    options: ["An electric fence", "A raging river", "A locked door"],
-    status: 'available',
-  },
-];
-
-const INITIAL_ACTIVITIES: ActivityItem[] = [
-  {
-    id: 'act-01',
-    title: 'Apex Protocol Sponsor Task #24 Verified',
-    time: '8 mins ago',
-    amount: '+$0.50',
-    type: 'ad',
-    status: 'completed',
-    details: 'Video engagement & comprehension check approved.',
-  },
-  {
-    id: 'act-02',
-    title: 'Level 1 Referral Bonus (Elena R. Task Batch)',
-    time: '2 hours ago',
-    amount: '+$1.60',
-    type: 'referral',
-    status: 'completed',
-    details: '8% direct sponsor activity commission.',
-  },
-  {
-    id: 'act-03',
-    title: 'Withdrawal Request #WTH-99428',
-    time: '4 hours ago',
-    amount: '-$35.00',
-    type: 'withdrawal',
-    status: 'processing',
-    txHash: '0x8b3e...941c',
-    details: 'Automated anti-fraud verification in progress.',
-  },
-  {
-    id: 'act-04',
-    title: 'Nova Tech Creative Review #23 Verified',
-    time: '5 hours ago',
-    amount: '+$0.50',
-    type: 'ad',
-    status: 'completed',
-    details: 'App UI review credited.',
-  },
-  {
-    id: 'act-05',
-    title: 'Level 2 Referral Bonus (Team Member Task Quota)',
-    time: '1 day ago',
-    amount: '+$0.80',
-    type: 'referral',
-    status: 'completed',
-    details: '4% second-tier network override.',
-  },
-  {
-    id: 'act-06',
-    title: 'Deposit Confirmed (USDT TRC-20)',
-    time: '3 days ago',
-    amount: '+$100.00',
-    type: 'deposit',
-    status: 'completed',
-    txHash: 'f48c1e28...9a0b3f',
-    details: 'Growth Package activated (30 tasks/day quota).',
-  },
-  {
-    id: 'act-07',
-    title: 'Withdrawal Completed #WTH-98104',
-    time: '6 days ago',
-    amount: '-$65.00',
-    type: 'withdrawal',
-    status: 'completed',
-    txHash: 'e71b29fa...8d4310',
-    details: 'Dispatched to TRC-20 wallet (TX verified on-chain).',
-  },
-];
-
-const INITIAL_WITHDRAWALS: WithdrawalRecord[] = [
-  {
-    id: 'WTH-99428',
-    amount: 35.00,
-    fee: 0.53,
-    netAmount: 34.47,
-    network: 'TRC-20',
-    address: 'TPyM8c7h4aL89QhZk2u8vX5yNmW0eR1t3p',
-    requestedAt: 'Today, 04:12 UTC',
-    status: 'verifying',
-    txHash: 'Pending Dispatch',
-  },
-  {
-    id: 'WTH-98104',
-    amount: 65.00,
-    fee: 0.98,
-    netAmount: 64.02,
-    network: 'TRC-20',
-    address: 'TPyM8c7h4aL89QhZk2u8vX5yNmW0eR1t3p',
-    requestedAt: 'Sep 11, 2026 14:22 UTC',
-    status: 'completed',
-    txHash: 'e71b29fa03db5c8913b8e719ad6291a84f392b',
-  },
-  {
-    id: 'WTH-96531',
-    amount: 80.00,
-    fee: 1.20,
-    netAmount: 78.80,
-    network: 'POLYGON',
-    address: '0x3D88f219Cb0e14a7904EcB589d1b64c010A56E21',
-    requestedAt: 'Aug 29, 2026 09:15 UTC',
-    status: 'completed',
-    txHash: '0x3ca9812bf087e5b22416a928ef05b4c17983fcaf',
-  },
-];
-
-const INITIAL_DEPOSITS: DepositRecord[] = [
-  {
-    id: 'DEP-44912',
-    amount: 100.00,
-    network: 'TRC-20',
-    address: 'TPyM8c7h4aL89QhZk2u8vX5yNmW0eR1t3p',
-    txHash: 'f48c1e289da017bca891104e12f9b88e1a89b0',
-    timestamp: 'Sep 14, 2026 11:30 UTC',
-    status: 'confirmed',
-    tierUpgradedTo: 'growth',
-  },
-  {
-    id: 'DEP-32014',
-    amount: 25.00,
-    network: 'TRC-20',
-    address: 'TPyM8c7h4aL89QhZk2u8vX5yNmW0eR1t3p',
-    txHash: 'a12f94b8e219087c53bbaf0914c81a942b083c',
-    timestamp: 'Aug 10, 2026 08:44 UTC',
-    status: 'confirmed',
-    tierUpgradedTo: 'starter',
-  },
-];
-
-const INITIAL_REFERRALS: ReferralUser[] = [
-  {
-    id: 'ref-1',
-    username: 'elena_cryptoview',
-    level: 1,
-    joinedDate: 'Sep 02, 2026',
-    tier: 'Growth',
-    tasksCompletedToday: 26,
-    commissionGenerated: 24.80,
-    status: 'active',
-  },
-  {
-    id: 'ref-2',
-    username: 'marcus_alpha_node',
-    level: 1,
-    joinedDate: 'Sep 05, 2026',
-    tier: 'Pro',
-    tasksCompletedToday: 55,
-    commissionGenerated: 42.10,
-    status: 'active',
-  },
-  {
-    id: 'ref-3',
-    username: 'david_defi_hunter',
-    level: 1,
-    joinedDate: 'Sep 09, 2026',
-    tier: 'Starter',
-    tasksCompletedToday: 12,
-    commissionGenerated: 6.40,
-    status: 'active',
-  },
-  {
-    id: 'ref-4',
-    username: 'sarah_web3_design',
-    level: 2,
-    joinedDate: 'Sep 11, 2026',
-    tier: 'Growth',
-    tasksCompletedToday: 20,
-    commissionGenerated: 9.60,
-    status: 'active',
-  },
-  {
-    id: 'ref-5',
-    username: 'alex_trader_99',
-    level: 2,
-    joinedDate: 'Sep 12, 2026',
-    tier: 'Starter',
-    tasksCompletedToday: 10,
-    commissionGenerated: 3.20,
-    status: 'active',
-  },
-  {
-    id: 'ref-6',
-    username: 'kevin_quant_node',
-    level: 3,
-    joinedDate: 'Sep 15, 2026',
-    tier: 'Growth',
-    tasksCompletedToday: 18,
-    commissionGenerated: 2.30,
-    status: 'active',
-  },
-];
 
 const DASHBOARD_TABS: DashboardTab[] = ['overview', 'tasks', 'deposits-withdrawals', 'activities', 'network', 'settings'];
 
 const DashboardContext = createContext<DashboardContextType | undefined>(undefined);
 
+const num = (v: string | number | null | undefined) => Number(v ?? 0);
+const money = (n: number) => `$${Math.abs(n).toFixed(2)}`;
+const signed = (n: number) => `${n < 0 ? '-' : '+'}${money(n)}`;
+const errText = (e: unknown, fallback = 'Something went wrong.') => (e instanceof ApiError ? e.message : fallback);
+
+export const relativeTime = (iso: string): string => {
+  const secs = Math.max(0, (Date.now() - new Date(iso).getTime()) / 1000);
+  if (secs < 60) return 'Just now';
+  if (secs < 3600) return `${Math.floor(secs / 60)} mins ago`;
+  if (secs < 86400) return `${Math.floor(secs / 3600)} hours ago`;
+  if (secs < 7 * 86400) return `${Math.floor(secs / 86400)} days ago`;
+  return new Date(iso).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
+};
+
+const fullTime = (iso: string) => new Date(iso).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
+
+const kycLabel = (status: string) =>
+  ({ verified: 'Verified', pending: 'Verification pending', rejected: 'Verification rejected', none: 'Not verified' })[status] ?? status;
+
+const whitelistKey = (userId: string) => `attentia_wallets_${userId}`;
+const EMPTY_WHITELIST: WalletWhitelist = { trc20: '', erc20: '', polygon: '' };
+
+const loadWhitelist = (userId: string): WalletWhitelist => {
+  try {
+    return { ...EMPTY_WHITELIST, ...JSON.parse(localStorage.getItem(whitelistKey(userId)) ?? '{}') };
+  } catch {
+    return EMPTY_WHITELIST;
+  }
+};
+
 export const DashboardProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [userProfile, setUserProfile] = useState<UserProfile>(INITIAL_PROFILE);
+  const { user, isAuthenticated, setUser } = useAuth();
+
   // The active tab lives in the URL (/dashboard/:tab) so it survives reloads and supports deep links.
   const location = useLocation();
   const navigate = useNavigate();
@@ -373,26 +152,20 @@ export const DashboardProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   const activeTab: DashboardTab = tabFromPath && DASHBOARD_TABS.includes(tabFromPath) ? tabFromPath : 'overview';
   const setActiveTab = (tab: DashboardTab) => navigate(tab === 'overview' ? '/dashboard' : `/dashboard/${tab}`);
 
-  const [availableBalance, setAvailableBalance] = useState<number>(245.80);
-  const [todayEarned, setTodayEarned] = useState<number>(12.50);
-  const [pendingWithdrawal, setPendingWithdrawal] = useState<number>(35.00);
-  const [totalReferralBonus, setTotalReferralBonus] = useState<number>(88.40);
-  const [totalEarnedAllTime, setTotalEarnedAllTime] = useState<number>(528.50);
-
-  const [completedToday, setCompletedToday] = useState<number>(24);
-  const dailyTotalQuota = userProfile.tier === 'starter' ? 15 : userProfile.tier === 'growth' ? 30 : 60;
-  const rewardPerTask = 0.50;
-
-  const [tasks, setTasks] = useState<DashboardTask[]>(INITIAL_TASKS);
-  const [activities, setActivities] = useState<ActivityItem[]>(INITIAL_ACTIVITIES);
-  const [withdrawals, setWithdrawals] = useState<WithdrawalRecord[]>(INITIAL_WITHDRAWALS);
-  const [deposits, setDeposits] = useState<DepositRecord[]>(INITIAL_DEPOSITS);
-  const [referrals] = useState<ReferralUser[]>(INITIAL_REFERRALS);
-
+  const [feed, setFeed] = useState<ApiFeed | null>(null);
+  const [balances, setBalances] = useState<ApiBalances | null>(null);
+  const [ledger, setLedger] = useState<ApiLedgerEntry[]>([]);
+  const [interactions, setInteractions] = useState<ApiInteraction[]>([]);
+  const [apiDeposits, setApiDeposits] = useState<ApiDeposit[]>([]);
+  const [apiWithdrawals, setApiWithdrawals] = useState<ApiWithdrawal[]>([]);
+  const [packages, setPackages] = useState<ApiPackageFull[]>([]);
+  const [subscription, setSubscription] = useState<ApiSubscription | null>(null);
+  const [analytics, setAnalytics] = useState<ApiParticipantAnalytics | null>(null);
+  const [canSimulateDeposits, setCanSimulate] = useState(false);
+  const [wallets, setWallets] = useState<WalletWhitelist>(EMPTY_WHITELIST);
+  const [isLoading, setIsLoading] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [notification, setNotification] = useState<string | null>(null);
-
-  const referralCode = 'PAUL-9821';
-  const referralLink = 'https://attentia.app/ref/PAUL-9821';
 
   // Automatically dismiss notification after 4 seconds
   useEffect(() => {
@@ -402,213 +175,344 @@ export const DashboardProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     }
   }, [notification]);
 
-  // Complete a task function
-  const completeTask = (taskId: string, rating: number, answer: string): boolean => {
-    const task = tasks.find(t => t.id === taskId);
-    if (!task || task.status === 'completed') return false;
-    // A 1–5 star rating is mandatory before a task can be claimed.
-    if (!Number.isInteger(rating) || rating < 1 || rating > 5) return false;
+  const refresh = useCallback(async () => {
+    const results = await Promise.allSettled([
+      campaignsApi.feed().then(setFeed),
+      rewardsApi.balances().then(setBalances),
+      rewardsApi.ledger().then(setLedger),
+      interactionsApi.list().then(setInteractions),
+      paymentsApi.deposits().then(setApiDeposits),
+      paymentsApi.withdrawals().then(setApiWithdrawals),
+      packagesApi.list().then(setPackages),
+      packagesApi.subscription().then(setSubscription),
+      analyticsApi.me().then(setAnalytics),
+    ]);
+    const failed = results.find((r) => r.status === 'rejected') as PromiseRejectedResult | undefined;
+    setLoadError(failed ? errText(failed.reason, 'Could not load some dashboard data.') : null);
+  }, []);
 
-    // Mark task as completed
-    setTasks(prev => prev.map(t => t.id === taskId ? { ...t, status: 'completed' } : t));
-    
-    // Increment numbers
-    const taskReward = task.reward;
-    setAvailableBalance(prev => +(prev + taskReward).toFixed(2));
-    setTodayEarned(prev => +(prev + taskReward).toFixed(2));
-    setTotalEarnedAllTime(prev => +(prev + taskReward).toFixed(2));
-    setCompletedToday(prev => prev + 1);
-
-    // Add activity record
-    const newActivity: ActivityItem = {
-      id: `act-${Date.now()}`,
-      title: `${task.sponsor} Sponsor Task #${completedToday + 1} Verified`,
-      time: 'Just now',
-      amount: `+$${taskReward.toFixed(2)}`,
-      type: 'ad',
-      status: 'completed',
-      details: `Rating: ${rating}/5. Survey answer recorded on-chain.`,
-    };
-
-    setActivities(prev => [newActivity, ...prev]);
-    setNotification(`Task completed! +$${taskReward.toFixed(2)} credited to your available balance.`);
-    return true;
-  };
-
-  // Request a withdrawal
-  const requestWithdrawal = (
-    amount: number, 
-    network: 'TRC-20' | 'ERC-20' | 'POLYGON', 
-    address: string
-  ): { success: boolean; message: string } => {
-    const minWithdrawal = userProfile.tier === 'starter' ? 10 : userProfile.tier === 'growth' ? 25 : 50;
-
-    if (amount < minWithdrawal) {
-      return { 
-        success: false, 
-        message: `Minimum withdrawal for ${userProfile.tier.toUpperCase()} tier is $${minWithdrawal}.00.` 
-      };
+  // Load on sign-in, clear on sign-out.
+  const userId = user?.id;
+  useEffect(() => {
+    if (!isAuthenticated || !userId) {
+      setFeed(null);
+      setBalances(null);
+      setLedger([]);
+      setInteractions([]);
+      setApiDeposits([]);
+      setApiWithdrawals([]);
+      setSubscription(null);
+      setAnalytics(null);
+      return;
     }
+    setWallets(loadWhitelist(userId));
+    setIsLoading(true);
+    refresh().finally(() => setIsLoading(false));
+    profileApi
+      .health()
+      .then((h) => setCanSimulate(h.environment === 'development'))
+      .catch(() => setCanSimulate(false));
+  }, [isAuthenticated, userId, refresh]);
 
-    if (amount > availableBalance) {
-      return { 
-        success: false, 
-        message: `Insufficient available funds. Your available balance is $${availableBalance.toFixed(2)}.` 
-      };
-    }
-
-    if (!address || address.length < 15) {
-      return { 
-        success: false, 
-        message: 'Please provide a valid destination wallet address.' 
-      };
-    }
-
-    const feePercent = userProfile.tier === 'starter' ? 0.02 : userProfile.tier === 'growth' ? 0.015 : 0.01;
-    const fee = +(amount * feePercent).toFixed(2);
-    const netAmount = +(amount - fee).toFixed(2);
-
-    const newTxId = `WTH-${Math.floor(10000 + Math.random() * 90000)}`;
-
-    const newWithdrawal: WithdrawalRecord = {
-      id: newTxId,
-      amount,
-      fee,
-      netAmount,
-      network,
-      address,
-      requestedAt: 'Just now',
-      status: 'submitted',
-    };
-
-    // Deduct available, add to pending
-    setAvailableBalance(prev => +(prev - amount).toFixed(2));
-    setPendingWithdrawal(prev => +(prev + amount).toFixed(2));
-    setWithdrawals(prev => [newWithdrawal, ...prev]);
-
-    // Add activity record
-    const newActivity: ActivityItem = {
-      id: `act-${Date.now()}`,
-      title: `Withdrawal Request #${newTxId}`,
-      time: 'Just now',
-      amount: `-$${amount.toFixed(2)}`,
-      type: 'withdrawal',
-      status: 'processing',
-      details: `${network} payout of $${netAmount.toFixed(2)} ($${fee.toFixed(2)} fee)`,
-    };
-    setActivities(prev => [newActivity, ...prev]);
-
-    // Simulate backend verification stage update
-    setTimeout(() => {
-      setWithdrawals(prev => 
-        prev.map(w => w.id === newTxId ? { ...w, status: 'verifying' } : w)
-      );
-    }, 2500);
-
-    setNotification(`Withdrawal #${newTxId} submitted! Processing through automated security validation.`);
-    return { success: true, message: 'Withdrawal requested successfully.' };
-  };
-
-  // Submit a deposit (simulate package upgrade or funding)
-  const submitDeposit = (
-    amount: number, 
-    network: 'TRC-20' | 'ERC-20' | 'POLYGON', 
-    targetTier?: 'starter' | 'growth' | 'pro'
-  ) => {
-    const newDepId = `DEP-${Math.floor(10000 + Math.random() * 90000)}`;
-    const mockHash = `${Math.random().toString(36).substring(2, 10)}${Math.random().toString(36).substring(2, 10)}`;
-
-    const newDeposit: DepositRecord = {
-      id: newDepId,
-      amount,
-      network,
-      address: userProfile.walletWhitelist[network === 'TRC-20' ? 'trc20' : network === 'ERC-20' ? 'erc20' : 'polygon'],
-      txHash: mockHash,
-      timestamp: 'Just now',
-      status: 'confirmed',
-      tierUpgradedTo: targetTier,
-    };
-
-    setDeposits(prev => [newDeposit, ...prev]);
-    setAvailableBalance(prev => +(prev + amount).toFixed(2));
-
-    if (targetTier && targetTier !== userProfile.tier) {
-      setUserProfile(prev => ({ ...prev, tier: targetTier }));
-    }
-
-    const newActivity: ActivityItem = {
-      id: `act-${Date.now()}`,
-      title: `Deposit Confirmed (${network})`,
-      time: 'Just now',
-      amount: `+$${amount.toFixed(2)}`,
-      type: 'deposit',
-      status: 'completed',
-      txHash: mockHash,
-      details: targetTier ? `Account upgraded to ${targetTier.toUpperCase()} package.` : 'Wallet credited.',
-    };
-    setActivities(prev => [newActivity, ...prev]);
-
-    setNotification(`Deposit of $${amount.toFixed(2)} confirmed! Ledger balance updated.`);
-  };
-
-  const updateUserProfile = (profile: Partial<UserProfile>) => {
-    setUserProfile(prev => ({ ...prev, ...profile }));
-    setNotification('Profile details updated successfully.');
-  };
-
-  const updateWalletWhitelist = (wallets: { trc20?: string; erc20?: string; polygon?: string }) => {
-    setUserProfile(prev => ({
-      ...prev,
-      walletWhitelist: {
-        ...prev.walletWhitelist,
-        ...wallets,
-      },
-    }));
-    setNotification('Payout wallet whitelist addresses successfully updated.');
-  };
-
-  const toggle2FA = () => {
-    setUserProfile(prev => {
-      const nextVal = !prev.twoFactorEnabled;
-      setNotification(nextVal ? 'Two-Factor Authentication activated.' : 'Two-Factor Authentication disabled.');
-      return { ...prev, twoFactorEnabled: nextVal };
-    });
-  };
-
-  return (
-    <DashboardContext.Provider
-      value={{
-        userProfile,
-        activeTab,
-        setActiveTab,
-        availableBalance,
-        todayEarned,
-        pendingWithdrawal,
-        totalReferralBonus,
-        totalEarnedAllTime,
-        completedToday,
-        dailyTotalQuota,
-        rewardPerTask,
-        tasks,
-        activities,
-        withdrawals,
-        deposits,
-        referrals,
-        referralCode,
-        referralLink,
-        completeTask,
-        requestWithdrawal,
-        submitDeposit,
-        updateUserProfile,
-        updateWalletWhitelist,
-        toggle2FA,
-        notification,
-        setNotification,
-      }}
-    >
-      {children}
-    </DashboardContext.Provider>
+  const userProfile: UserProfile = useMemo(
+    () => ({
+      name: user?.full_name || user?.username || '',
+      email: user?.email ?? '',
+      accountId: user ? user.id.slice(0, 8).toUpperCase() : '',
+      tier: subscription?.package.code ?? 'none',
+      memberSince: user ? new Date(user.created_at).toLocaleDateString(undefined, { month: 'long', year: 'numeric' }) : '',
+      kycLevel: kycLabel(user?.kyc_status ?? 'none'),
+      twoFactorEnabled: !!user?.two_factor_enabled,
+      walletWhitelist: wallets,
+    }),
+    [user, subscription, wallets],
   );
+
+  // Campaigns the participant already attempted today but that were not verified.
+  const rejectedToday = useMemo(() => {
+    const today = new Date().toISOString().slice(0, 10);
+    return new Set(
+      interactions.filter((i) => i.status === 'rejected' && i.started_at.slice(0, 10) === today).map((i) => i.campaign_id),
+    );
+  }, [interactions]);
+
+  const tasks: DashboardTask[] = useMemo(
+    () =>
+      (feed?.items ?? []).map((i) => ({
+        id: i.id,
+        title: i.name,
+        sponsor: i.brand,
+        category: i.category,
+        reward: num(i.reward),
+        durationSeconds: Math.min(Math.round(i.duration_seconds ?? MAX_VIEW_SECONDS), MAX_VIEW_SECONDS),
+        description: i.description,
+        mediaUrl: i.media_url ?? undefined,
+        youtubeId: i.youtube_id ?? undefined,
+        ratingPrompt: i.rating_prompt,
+        question: i.question,
+        options: i.options,
+        status: i.completed_today ? (rejectedToday.has(i.id) ? 'rejected' : 'completed') : 'available',
+        isDemo: i.is_demo,
+        requiresFeedback: i.requires_feedback,
+      })),
+    [feed, rejectedToday],
+  );
+
+  const withdrawals: WithdrawalRecord[] = useMemo(
+    () =>
+      apiWithdrawals.map((w) => ({
+        id: w.id.slice(0, 8).toUpperCase(),
+        amount: num(w.amount),
+        fee: num(w.fee),
+        netAmount: num(w.net_amount),
+        network: w.network,
+        address: w.address,
+        requestedAt: fullTime(w.created_at),
+        status: w.status === 'requested' ? 'verifying' : w.status,
+        txHash: w.tx_hash ?? undefined,
+        rejectionReason: w.rejection_reason ?? undefined,
+        explorerUrl: w.explorer_url ?? undefined,
+      })),
+    [apiWithdrawals],
+  );
+
+  const deposits: DepositRecord[] = useMemo(
+    () =>
+      apiDeposits.map((d) => ({
+        id: d.id.slice(0, 8).toUpperCase(),
+        amount: num(d.received_amount ?? d.expected_amount),
+        network: d.network,
+        address: d.address,
+        txHash: d.tx_hash ?? '',
+        timestamp: fullTime(d.confirmed_at ?? d.created_at),
+        status: d.status === 'awaiting_payment' ? 'awaiting payment' : d.status,
+        explorerUrl: d.explorer_url ?? undefined,
+      })),
+    [apiDeposits],
+  );
+
+  const pendingDeposit = useMemo(
+    () =>
+      apiDeposits.find(
+        (d) => (d.status === 'awaiting_payment' || d.status === 'pending') && new Date(d.expires_at).getTime() > Date.now(),
+      ) ?? null,
+    [apiDeposits],
+  );
+
+  // Statement built from the append-only ledger (grouped per transaction) plus rejected tasks.
+  const activities: ActivityItem[] = useMemo(() => {
+    const wById = new Map<string, ApiWithdrawal>(apiWithdrawals.map((w) => [w.id, w]));
+    const groups = new Map<string, ApiLedgerEntry[]>();
+    ledger.forEach((e) => groups.set(e.transaction_id, [...(groups.get(e.transaction_id) ?? []), e]));
+    const out: ActivityItem[] = [];
+
+    groups.forEach((legs, txn) => {
+      const first = legs[0];
+      const sumOf = (account: string) => legs.filter((l) => l.account === account).reduce((s, l) => s + num(l.amount), 0);
+      const base = { id: txn, time: relativeTime(first.created_at), at: first.created_at, details: first.description ?? undefined };
+      switch (first.entry_type) {
+        case 'reward':
+          out.push({ ...base, title: first.description || 'Verified sponsor engagement', amount: signed(sumOf('rewards')), type: 'ad', status: 'completed' });
+          break;
+        case 'deposit':
+          out.push({ ...base, title: 'Deposit received', amount: signed(sumOf('deposits')), type: 'deposit', status: 'completed' });
+          break;
+        case 'package_purchase':
+          break; // internal re-allocation of the deposit; shown as part of the deposit
+        case 'withdrawal_request': {
+          const w = wById.get(first.reference_id);
+          out.push({
+            ...base,
+            title: `Withdrawal request #${first.reference_id.slice(0, 8).toUpperCase()}`,
+            amount: signed(-Math.abs(sumOf('pending_withdrawal'))),
+            type: 'withdrawal',
+            status: w?.status === 'completed' ? 'completed' : w?.status === 'rejected' ? 'failed' : 'processing',
+            txHash: w?.tx_hash ?? undefined,
+            details: w?.status === 'rejected' ? `Rejected: ${w.rejection_reason}` : w?.status === 'completed' ? 'Paid out' : 'Awaiting admin review.',
+          });
+          break;
+        }
+        case 'withdrawal_reversal':
+          out.push({ ...base, title: 'Withdrawal returned to balance', amount: signed(sumOf('rewards')), type: 'withdrawal', status: 'completed' });
+          break;
+        case 'adjustment': {
+          const amt = sumOf('rewards');
+          out.push({ ...base, title: 'Balance adjustment', amount: signed(amt), type: amt < 0 ? 'withdrawal' : 'deposit', status: 'completed' });
+          break;
+        }
+        default:
+          break; // withdrawal_complete is reflected on the request above
+      }
+    });
+
+    interactions
+      .filter((i) => i.status === 'rejected' && i.submitted_at)
+      .forEach((i) =>
+        out.push({
+          id: i.id,
+          title: 'Task not verified',
+          time: relativeTime(i.submitted_at!),
+          at: i.submitted_at!,
+          amount: '$0.00',
+          type: 'ad',
+          status: 'failed',
+          details: i.rejection_reason ?? undefined,
+        }),
+      );
+
+    return out.sort((a, b) => (b.at ?? '').localeCompare(a.at ?? ''));
+  }, [ledger, apiWithdrawals, interactions]);
+
+  const todayIso = new Date().toISOString().slice(0, 10);
+  const todayEarned = interactions
+    .filter((i) => i.status === 'verified' && (i.verified_at ?? '').slice(0, 10) === todayIso)
+    .reduce((s, i) => s + num(i.reward_amount), 0);
+
+  const rewardPerTask = tasks.length ? tasks.reduce((s, t) => s + t.reward, 0) / tasks.length : 0;
+
+  // ---- Task flow: start -> playback events -> submit (all verified by the server) ---------
+
+  const startTask = useCallback(async (taskId: string): Promise<StartedTask> => {
+    const it = await interactionsApi.start(taskId);
+    return { interactionId: it.id, requiredSeconds: it.required_seconds };
+  }, []);
+
+  const sendPlaybackEvents = useCallback(
+    async (interactionId: string, events: { type: PlaybackEventName; position: number }[]) => {
+      if (!events.length) return;
+      try {
+        await interactionsApi.events(interactionId, events);
+      } catch {
+        // A dropped batch only costs watched time; the server decides at submit time.
+      }
+    },
+    [],
+  );
+
+  const submitTask = useCallback(
+    async (interactionId: string, rating: number, answer: string, feedback?: string): Promise<SubmitResult> => {
+      try {
+        const it = await interactionsApi.submit(interactionId, { rating, answer, feedback: feedback || undefined });
+        await refresh();
+        if (it.status === 'verified') {
+          const reward = num(it.reward_amount);
+          setNotification(`Task verified! +${money(reward)} credited to your available balance.`);
+          return { ok: true, message: 'Verified', reward };
+        }
+        return { ok: false, message: it.rejection_reason ?? 'The task could not be verified.' };
+      } catch (e) {
+        await refresh();
+        return { ok: false, message: errText(e, 'Could not submit the task.') };
+      }
+    },
+    [refresh],
+  );
+
+  const requestWithdrawal = useCallback(
+    async (amount: number, network: ApiNetwork, address: string) => {
+      try {
+        const w = await paymentsApi.requestWithdrawal(amount.toFixed(2), network, address.trim());
+        await refresh();
+        setNotification(`Withdrawal of ${money(num(w.amount))} requested. An admin will review it.`);
+        return { success: true, message: 'Withdrawal requested successfully.' };
+      } catch (e) {
+        return { success: false, message: errText(e, 'Could not request the withdrawal.') };
+      }
+    },
+    [refresh],
+  );
+
+  const createDeposit = useCallback(
+    async (packageId: string, network: ApiNetwork) => {
+      const d = await paymentsApi.createDeposit(packageId, network);
+      await refresh();
+      return d;
+    },
+    [refresh],
+  );
+
+  const simulateDeposit = useCallback(
+    async (deposit: ApiDeposit) => {
+      await paymentsApi.simulateDeposit(deposit.id, deposit.expected_amount);
+      await refresh();
+      setNotification('Simulated transfer recorded. Confirmations are counted by the server.');
+    },
+    [refresh],
+  );
+
+  const updateUserProfile = useCallback(
+    async ({ name }: { name: string }) => {
+      try {
+        setUser(await profileApi.update({ full_name: name }));
+        setNotification('Profile details updated successfully.');
+      } catch (e) {
+        setNotification(errText(e, 'Could not update your profile.'));
+      }
+    },
+    [setUser],
+  );
+
+  const updateWalletWhitelist = useCallback(
+    (next: Partial<WalletWhitelist>) => {
+      setWallets((prev) => {
+        const merged = { ...prev, ...next };
+        try {
+          if (userId) localStorage.setItem(whitelistKey(userId), JSON.stringify(merged));
+        } catch {
+          // storage unavailable: the addresses last for this page only
+        }
+        return merged;
+      });
+      setNotification('Payout wallet addresses saved on this device.');
+    },
+    [userId],
+  );
+
+  const referralCode = user ? `${user.username.toUpperCase()}-${user.id.slice(0, 4).toUpperCase()}` : '';
+  const referralLink = referralCode ? `${window.location.origin}/?ref=${referralCode}` : '';
+
+  const value: DashboardContextType = {
+    userProfile,
+    activeTab,
+    setActiveTab,
+    isLoading,
+    loadError,
+    refresh,
+    availableBalance: num(balances?.available),
+    todayEarned,
+    pendingWithdrawal: num(balances?.pending_withdrawal),
+    totalReferralBonus: REFERRAL_PREVIEW_BONUS,
+    totalEarnedAllTime: num(balances?.total_earned),
+    completedToday: feed?.completed_today ?? 0,
+    dailyTotalQuota: feed?.daily_quota ?? 0,
+    rewardPerTask,
+    hasActivePackage: !!subscription,
+    minWithdrawal: num(subscription?.package.min_withdrawal),
+    withdrawalFeeRate: num(subscription?.package.withdrawal_fee_pct),
+    dailyTrend: analytics?.daily ?? [],
+    tasks,
+    activities,
+    withdrawals,
+    deposits,
+    pendingDeposit,
+    packages,
+    canSimulateDeposits,
+    referrals: REFERRAL_PREVIEW,
+    referralCode,
+    referralLink,
+    startTask,
+    sendPlaybackEvents,
+    submitTask,
+    requestWithdrawal,
+    createDeposit,
+    simulateDeposit,
+    updateUserProfile,
+    updateWalletWhitelist,
+    notification,
+    setNotification,
+  };
+
+  return <DashboardContext.Provider value={value}>{children}</DashboardContext.Provider>;
 };
 
 export const useDashboard = () => {

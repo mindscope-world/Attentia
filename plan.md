@@ -2,7 +2,7 @@
 
 Attention-rewards marketing platform: advertisers fund campaigns, verified participants watch sponsored content, rate it, and earn micro-rewards.
 
-_Last reviewed: 2026-11-07, against commit `22fd4bd` (PR #3 merged)._
+_Last reviewed: 2026-11-27, against commit `90a2e28` (branch `feat/dashboard-api`)._
 
 ## Legend
 
@@ -16,12 +16,27 @@ _Last reviewed: 2026-11-07, against commit `22fd4bd` (PR #3 merged)._
 
 There are now two halves:
 
-- **Backend (done at the API level).** FastAPI + PostgreSQL + Redis + Celery + S3-compatible storage, all in Docker Compose. Modules: users/auth, packages, campaigns, assets (uploads, FFmpeg, YouTube), verification, rewards (ledger), payments (deposits and withdrawals) and analytics. 18 integration tests pass against real Postgres, Redis and S3.
-- **Frontend (mostly still mock).** Login and registration call the API (JWT). Everything else on the participant dashboard still comes from hardcoded state in `src/context/DashboardContext.tsx`, including tasks, balances, deposits and withdrawals. The rewards and verification rules therefore run on the client, not the server.
+- **Backend (done at the API level).** FastAPI + PostgreSQL + Redis + Celery + S3-compatible storage, all in Docker Compose. Modules: users/auth, packages, campaigns, assets (uploads, FFmpeg, YouTube), verification, rewards (ledger), payments (deposits and withdrawals) and analytics. 36 integration tests pass against real Postgres, Redis and S3.
+- **Frontend (participant dashboard now API-backed).** Login, registration, tasks, balances, history, deposits, withdrawals, packages and profile all come from the API. `DashboardContext` no longer holds mock state; the server verifies tasks and credits rewards. The one exception is the referral programme, which has no backend and shows labelled preview data (`src/data/referrals.ts`).
 
-**The biggest gap is wiring the dashboard to the API.** Most items below are 🟧 for that reason. There is still no admin or advertiser dashboard UI, although the admin and advertiser API endpoints exist.
+The participant dashboard is wired to the API (see the latest progress table). The admin dashboard (`/admin`) now exists and is fully API-backed. There is still no advertiser dashboard UI, although the advertiser API endpoints exist.
 
-## Progress since the last review (2026-11-06)
+## Progress since the last review (2026-11-27)
+
+| Change | Detail |
+|---|---|
+| **Participant dashboard wired to the API** | Tasks come from `/campaigns/feed`. Opening a task starts an interaction, `YouTubeAdPlayer` events are batched to `/interactions/{id}/events` every ~2.5 s, and submit goes through `/interactions/{id}/submit`; the server's verdict (verified or the rejection reason) is shown. Balances, ledger statement, 7-day trend, deposits (real per-deposit address, package from the API, dev simulate button only when the API runs in development), withdrawals (package fee and minimum), packages and profile all read from the API. |
+| **Rules aligned on the server** | Any ad of 30 s or more needs exactly 29 s of real viewing (shorter ads need `min_watch_pct` of their length); campaign defaults are now `display_seconds` 30 and `min_watch_pct` 0.97. The dashboard shows the server's required time. |
+| **Demo content seeded on the server** | 16 YouTube demo ads, all flagged `is_demo` and labelled "Demo" in the dashboard: 8 real commercials across Technology, Financial Services, Consumer Goods, Telecommunications, E-commerce, Education, Automotive and Travel, plus the 8 Blender open movies the dashboard used to hardcode. The six old video-less fictional campaigns are paused. |
+| **Bug fixes found while wiring** | The feed marked an *abandoned* task as completed today (no reward, no way to resume); it now only counts verified or rejected attempts. Added `POST /users/me/password` (the Settings form faked success). `/health` also reports `environment`. |
+
+| Commit | Change |
+|---|---|
+| `2806e6d` | Ads always start unmuted (muted only if the browser refuses sound autoplay) |
+| `a46f939` | **Admin dashboard** at `/admin`: Overview, Users (search, role, KYC, ban with reason, balance credit/debit), Funds (withdrawal approve/reject, deposits) and Ads (add, hide, preview, delete). New `/admin` API, `users.banned_at`/`ban_reason` migration, 5 tests. Seed now honours `SEED_ADMIN_PASSWORD` (passed through Compose, applied to an existing admin). |
+| `90a2e28` | **Ad discovery and link library**: `ad_links` table keeps every ad link ever seen; "Fetch 20 new ads" searches the YouTube Data API (needs `YOUTUBE_API_KEY`) and queues candidates; approve, pause or decline (decline removes the ad but keeps the link so it is never fetched again). 6 tests. |
+
+## Progress before that (2026-11-06 to 2026-11-07)
 
 | Commit / PR | Change |
 |---|---|
@@ -54,16 +69,16 @@ There are now two halves:
 
 - 🟢 **Registration and authentication.** Register and log in through the API, JWT stored client-side and validated against `/users/me` on load. No OAuth yet.
 - 🟧 **Identity verification (KYC).** Users have a `kyc_status` that admins can change through the API, and withdrawals require `verified`. There is no document upload or verification provider.
-- 🟧 **Participation package selection.** Packages live in the database and admins can create and edit them through the API. The dashboard still shows hardcoded tiers.
-- 🟧 **Daily task quota.** Enforced by the server per package. The dashboard counts on the client and never resets.
-- 🟧 **Sponsored content discovery.** The API serves a live campaign feed (`/campaigns/feed`) with thumbnails. The dashboard shows 8 hardcoded video tasks instead.
+- 🟢 **Participation package selection.** The dashboard lists packages from the API and buys one through a per-deposit address. (The landing page's pricing cards are still static copy.)
+- 🟢 **Daily task quota.** Enforced by the server per package and shown from the feed (resets each UTC day).
+- 🟢 **Sponsored content discovery.** The dashboard lists the live campaign feed from `/campaigns/feed`, filterable by industry, with a visible demo label on demonstration content.
 - 🟢 **Video ad player.** Embedded YouTube player: autoplays (muted when the browser blocks sound), can't be paused or scrubbed, pauses while the tab is hidden, unlocks the review after 29s of real viewing and is cut at 30s.
 - 🟢 **Rating and feedback UI.** A 1–5 star rating is mandatory. Non-video tasks also ask a comprehension question.
-- 🟧 **Free-text qualitative feedback.** The server enforces it when a campaign sets `requires_feedback`. There is no input for it in the dashboard.
-- 🟧 **Reward balance tracking.** Balances come from the ledger via the API. The dashboard shows mock numbers.
-- 🟧 **Deposit and withdrawal management.** API complete (see §9 and §10). The dashboard flow is still simulated.
-- 🟧 **Task completion and transaction history.** The API exposes interactions and ledger entries. The Activities tab uses mock data.
-- 🟧 **Account and security settings.** Profile editing exists in the API (`PATCH /users/me`) and the UI. 2FA is a boolean flag only, with no TOTP.
+- 🟢 **Free-text qualitative feedback.** The dashboard shows a feedback box when a campaign sets `requires_feedback` (10 character minimum, enforced by the server).
+- 🟢 **Reward balance tracking.** Balances come from the ledger via the API.
+- 🟢 **Deposit and withdrawal management.** The dashboard uses the real API flow (see §9 and §10). Deposits are still confirmed by the development simulator, not a real chain.
+- 🟢 **Task completion and transaction history.** The Activities tab is built from the ledger and rejected interactions. Referral rows exist in the type but no real data yet.
+- 🟧 **Account and security settings.** Display name and password change use the API. Payout addresses are saved on the device only. 2FA is a read-only flag shown as "coming soon" (no TOTP).
 - 🟢 Notification toasts for completed actions
 
 ## 3. Advertising Campaign Engine (§4.2)
@@ -78,36 +93,38 @@ There are now two halves:
 
 ## 4. Attention Verification Engine (§4.3)
 
-- 🟧 **Minimum watch duration.** The server rejects submissions without enough elapsed and watched time. The dashboard enforces 29s on the client, but doesn't send playback events or submit through the API.
+- 🟢 **Minimum watch duration.** The server rejects submissions without enough elapsed and watched time (29 s for ads of 30 s or more). The dashboard sends playback events and unlocks the review from the server's requirement.
 - 🟢 Playback-event tracking on the server: play, pause, progress, seek, hidden and visible, with watched time accrued only from real forward playback
-- 🟧 **Mandatory rating and question.** Enforced by the server (rating 1–5, valid option, correct answer when set) and by the dashboard, but the dashboard doesn't use the server path yet.
+- 🟢 **Mandatory rating and question.** Enforced by the server (rating 1–5, valid option, correct answer when set) and used by the dashboard for every task, including video ads.
 - 🟢 Duplicate prevention and per-campaign daily limits (server)
 - 🟢 Suspicious-playback detection: seeks ahead and impossible progress are counted, and more than 3 rejects the interaction
 - 🟢 User and session verification (JWT on every interaction call; interactions belong to their user)
-- 🟧 **Server-side verification before rewards are credited.** Implemented in the API. The dashboard still credits rewards on the client in `completeTask`.
+- 🟢 **Server-side verification before rewards are credited.** Rewards are credited only by the API; the dashboard just displays the result.
 
 ## 5. Administrative Dashboard (§4.4)
 
-The backend has admin endpoints. There is **no admin UI** yet.
+The admin dashboard lives at `/admin` (admins only, linked from the user dashboard header) and talks to the API.
 
-- 🟧 User management (list and update users via API)
-- 🟧 KYC review and approval (set `kyc_status` via API)
-- 🟧 Package management (create and edit packages via API)
-- 🟧 Campaign management and moderation (create, edit, change status via API; only admins can mark campaigns as demo)
-- 🟧 Reward rate configuration (per-campaign `reward_rate` via API; platform fee set in config)
-- 🟧 Withdrawal monitoring and approval (approve and reject via API)
-- 🟣 Fraud and suspicious-activity monitoring view
-- 🟧 Platform analytics (admin analytics endpoint)
+- 🟢 User management: search, filter by role or banned status, change role, ban with a recorded reason, unban (a banned user's token stops working immediately)
+- 🟢 KYC review (set `kyc_status` per user)
+- 🟢 Funds: ledger-based credit or debit of a user's balance (cannot overdraw), deposits list
+- 🟢 Withdrawal monitoring and approval (approve with payout hash, reject with reason)
+- 🟢 Ad management: add from a YouTube URL, hide or show, preview, delete (extra confirmation when the ad has recorded views)
+- 🟢 Ad discovery: fetch 20 new candidate ads, approve, pause or decline; permanent link library of every ad link seen
+- 🟧 Package management (create and edit via API; no UI)
+- 🟧 Reward rate configuration (reward and budget are set when an ad is added or approved; no edit UI for existing campaigns)
+- 🟣 Fraud and suspicious-activity monitoring view (the overview shows a suspicious-events count only)
+- 🟢 Platform analytics overview
 - 🟣 User support management
-- 🟣 System configuration and audit log UI
+- 🟣 System configuration and audit log UI (ban reasons and balance-adjustment notes are stored; other admin actions are not logged)
 - 🟢 Role-based permissions (participant, advertiser, admin) on the API
 
 ## 6. Demo Advertising Content (§5)
 
-- 🟧 **Dashboard ad library.** 8 cards, each with an embeddable YouTube video (Blender open movies: Big Buck Bunny, Sintel, Tears of Steel, Elephants Dream, Spring, Agent 327, Caminandes 2 and 3). Card text matches each film. These are short films rather than real commercials, and the proposal's target is 10–20 ads across 8 industries.
-- 🟧 **Backend demo campaigns.** The seed creates 6 fictional-brand demo campaigns across industries, without video creatives.
+- 🟢 **Dashboard ad library.** The dashboard serves the API feed. The seed provides 16 YouTube demo ads (8 real commercials across the proposal's industries, plus the 8 Blender open movies), inside the 10–20 target.
+- 🟢 **Backend demo campaigns.** Seeded on the server with video creatives. The six older fictional-brand campaigns without video are paused by the seed.
 - 🟢 Demo vs. production flag on campaigns (`is_demo`)
-- 🟣 A visible "Demonstration content" marking in the dashboard
+- 🟢 A visible "Demo" label on task cards and "Demonstration content" in the task window
 - 🟣 Dummy MP4 creatives (H.264/AAC, 360p–720p, 16:9, 15–60 s) with thumbnails
 - 🟢 Creatives can be swapped through the API without schema changes
 
@@ -117,16 +134,16 @@ The backend has admin endpoints. There is **no admin UI** yet.
 |---|---|
 | 1. Registration | 🟢 Through the API |
 | 2. Identity verification | 🟧 Status field and admin API; no provider |
-| 3. Package selection | 🟧 API with simulated deposits; dashboard is mock |
-| 4. Content discovery | 🟧 API feed exists; dashboard uses hardcoded cards |
+| 3. Package selection | 🟧 Real API flow in the dashboard; deposits confirmed by the development simulator |
+| 4. Content discovery | 🟢 Dashboard serves the API feed |
 | 5. Ad engagement | 🟢 Autoplaying, unpausable 30s YouTube ads |
 | 6. Rating and evaluation | 🟢 Mandatory star rating (free-text feedback 🟧) |
-| 7. Task verification | 🟧 Implemented on the server; dashboard not wired |
-| 8. Reward allocation and notification | 🟧 Ledger credit on the server; dashboard credits on the client |
+| 7. Task verification | 🟢 Server-verified; dashboard wired |
+| 8. Reward allocation and notification | 🟢 Ledger credit on the server; dashboard shows the result and a toast |
 
 ## 8. Reward and Participation Model (§7)
 
-- 🟢 Per-campaign reward rate (the dashboard still shows a flat $0.50)
+- 🟢 Per-campaign reward rate (the dashboard shows each task's own reward)
 - 🟢 Reward calculation checks budget, quota, verification and platform fee before crediting
 - 🟢 Append-only ledger with sub-accounts (deposits, rewards, pending withdrawal, withdrawn, fees, packages); balances are sums of entries
 - 🟧 **Non-guaranteed reward messaging.** Neutral wording is in place; legal and compliance review still needed.
@@ -149,15 +166,15 @@ The backend has admin endpoints. There is **no admin UI** yet.
 - 🟢 Ledger separates deposits, rewards, pending amounts and withdrawn funds
 - 🟢 Withdrawal requests check KYC, active package, minimum amount, balance and network address, and charge the per-package fee
 - 🟢 Admin approval or rejection, with the reserved amount reversed on rejection
-- 🟧 **Dashboard.** Balances and the withdrawal flow are still simulated in the UI.
+- 🟢 **Dashboard.** Balances and the withdrawal flow use the API (package fee and minimum shown from the active package).
 - 🟧 **Payout wallet whitelist.** UI only; the server doesn't enforce it.
 - 🟣 Real on-chain payout dispatch (approval currently records a transaction hash supplied by the admin)
 
 ## 11. Analytics and Reporting (§10)
 
-- 🟧 **Participant analytics.** API endpoint exists; the Overview tab shows mock data.
+- 🟢 **Participant analytics.** The Overview tab's 7-day trend comes from `/analytics/me`.
 - 🟧 **Advertiser analytics.** API covers verified views, completion, average rating, feedback and budget use. No UI.
-- 🟧 **Admin analytics.** API endpoint exists. No UI.
+- 🟢 **Admin analytics.** Shown on the admin Overview tab.
 
 ## 12. Security and Platform Integrity (§12)
 
@@ -180,16 +197,18 @@ The backend has admin endpoints. There is **no admin UI** yet.
 
 ## Known inconsistencies to resolve
 
-- The dashboard's ad rule (unlock at 29s, cut at 30s) is client-side only. The backend's `display_seconds` defaults to 15 and the seeded demo campaigns use 15s. Align the server's required viewing time with the 29–30s rule before wiring the dashboard to the API.
-- The dashboard's 8 video cards and the backend's 6 seeded demo campaigns are different content. Pick one source (the API) and seed the YouTube creatives there.
+- Campaigns created before this change keep their stored defaults (`display_seconds` 15, `min_watch_pct` 0.9). Ads of 30 s or more are unaffected because the server now requires a flat 29 s; shorter ads and image creatives still use the stored values.
+- The referral programme shows preview data only and has no backend. Its "Network bonuses" figure is not part of the real balance.
+- The type check (`npm run lint`) cannot catch React or context type errors because `@types/react` is not installed. Add `@types/react` and `@types/react-dom`, then fix what it finds.
+- Payout addresses are stored per device (localStorage). The server does not enforce a whitelist.
 
 ---
 
 ## Suggested next milestones
 
-1. **Wire the participant dashboard to the API.** Serve tasks from `/campaigns/feed`, start interactions, send playback events from `YouTubeAdPlayer`, submit through `/interactions/{id}/submit`, and read balances, history, deposits and withdrawals from the API. Remove the mock state in `DashboardContext`.
-2. **Align ad rules and demo content on the server.** 29–30s viewing in verification and campaign defaults; seed the YouTube demo creatives (aim for 10–20 across the proposal's industries) with a visible demo label.
-3. **Admin dashboard v1.** Users and KYC, packages, campaigns, reward rates and withdrawal approvals, on top of the existing endpoints.
+1. ✅ **Wire the participant dashboard to the API.** Done; verified end to end (real player events, server verification, ledger credit).
+2. ✅ **Align ad rules and demo content on the server.** Done (29 s rule, 30 s defaults, 16 seeded demo ads).
+3. ✅ **Admin dashboard v1.** Done (see §5). Still to do: package editor, campaign editor, audit log.
 4. **Advertiser dashboard.** Upload creatives or register YouTube videos, configure campaigns and budgets, and view analytics.
 5. **Real blockchain deposits.** RPC-backed `ChainMonitor` and production address derivation, starting on testnets; reconciliation and explorer links.
 6. **Security hardening.** Rate limiting, TOTP 2FA, admin audit logs, server-enforced payout whitelist, dev secrets moved to `.env`.

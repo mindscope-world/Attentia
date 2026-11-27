@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { 
   ShieldCheck, 
   Key, 
@@ -18,13 +18,13 @@ import {
 } from 'lucide-react';
 import { useDashboard } from '../../context/DashboardContext';
 import { useTheme } from '../../context/ThemeContext';
+import { profileApi } from '../../lib/api';
 
 export const SettingsTab: React.FC = () => {
   const { 
     userProfile, 
     updateUserProfile, 
     updateWalletWhitelist, 
-    toggle2FA, 
     setNotification 
   } = useDashboard();
   const { theme, setTheme } = useTheme();
@@ -37,6 +37,14 @@ export const SettingsTab: React.FC = () => {
   const [trc20Address, setTrc20Address] = useState(userProfile.walletWhitelist.trc20);
   const [erc20Address, setErc20Address] = useState(userProfile.walletWhitelist.erc20);
   const [polygonAddress, setPolygonAddress] = useState(userProfile.walletWhitelist.polygon);
+
+  // Profile and wallets load asynchronously; keep the forms in step once they arrive.
+  useEffect(() => setDisplayName(userProfile.name), [userProfile.name]);
+  useEffect(() => {
+    setTrc20Address(userProfile.walletWhitelist.trc20);
+    setErc20Address(userProfile.walletWhitelist.erc20);
+    setPolygonAddress(userProfile.walletWhitelist.polygon);
+  }, [userProfile.walletWhitelist]);
 
   // Password change state
   const [currentPassword, setCurrentPassword] = useState('');
@@ -63,7 +71,7 @@ export const SettingsTab: React.FC = () => {
     updateUserProfile({ name: displayName });
   };
 
-  const handleChangePassword = (e: React.FormEvent) => {
+  const handleChangePassword = async (e: React.FormEvent) => {
     e.preventDefault();
     if (newPassword.length < 8) {
       setPasswordMsg({ type: 'error', text: 'New password must be at least 8 characters long.' });
@@ -74,6 +82,12 @@ export const SettingsTab: React.FC = () => {
       return;
     }
 
+    try {
+      await profileApi.changePassword(currentPassword, newPassword);
+    } catch (err) {
+      setPasswordMsg({ type: 'error', text: err instanceof Error ? err.message : 'Could not change the password.' });
+      return;
+    }
     setPasswordMsg({ type: 'success', text: 'Password successfully updated!' });
     setCurrentPassword('');
     setNewPassword('');
@@ -258,14 +272,16 @@ export const SettingsTab: React.FC = () => {
                 Two-Factor Authentication (TOTP Authenticator App)
               </span>
               <span className="text-[11px] text-[#71789c]">
-                Requires a 6-digit code from Google Authenticator or Authy to authorize payouts.
+                Coming soon: authenticator-app codes for payouts. {userProfile.twoFactorEnabled ? 'Your account is flagged as enabled.' : 'Not enabled yet.'}
               </span>
             </div>
 
             <button
               type="button"
-              onClick={toggle2FA}
-              className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors cursor-pointer shrink-0 ${
+              disabled
+              title="Authenticator-app 2FA is not available yet"
+              aria-label="Two-factor authentication (coming soon)"
+              className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors cursor-not-allowed opacity-50 shrink-0 ${
                 userProfile.twoFactorEnabled ? 'bg-[#7c5cfc]' : 'bg-[#2b2e52]'
               }`}
             >

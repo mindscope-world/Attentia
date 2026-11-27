@@ -17,6 +17,8 @@ interface AuthContextType {
   login: (identifier: string, password: string) => Promise<AuthResult>;
   register: (email: string, password: string) => Promise<AuthResult>;
   logout: () => void;
+  /** Replace the cached user after a profile change. */
+  setUser: (user: ApiUser) => void;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -57,7 +59,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   return (
-    <AuthContext.Provider value={{ isAuthenticated: !!user, isLoading, user, login, register, logout }}>
+    <AuthContext.Provider value={{ isAuthenticated: !!user, isLoading, user, login, register, logout, setUser }}>
       {children}
     </AuthContext.Provider>
   );

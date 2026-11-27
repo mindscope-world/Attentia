@@ -153,3 +153,156 @@ export const assetsApi = {
   addYouTube: (url: string, durationSeconds?: number) =>
     api.post<ApiAsset>('/assets/youtube', { url, duration_seconds: durationSeconds }),
 };
+
+// ---- Participant dashboard: feed, interactions, rewards, payments ------------------------
+
+export interface ApiFeed {
+  package: string | null;
+  daily_quota: number;
+  completed_today: number;
+  remaining_quota: number;
+  items: ApiFeedItem[];
+}
+
+export type InteractionStatus = 'started' | 'verified' | 'rejected';
+
+export interface ApiInteraction {
+  id: string;
+  campaign_id: string;
+  status: InteractionStatus;
+  started_at: string;
+  required_seconds: number;
+  watched_seconds: number;
+  rating: number | null;
+  answer: string | null;
+  feedback: string | null;
+  submitted_at: string | null;
+  verified_at: string | null;
+  rejection_reason: string | null;
+  reward_amount: string | null;
+}
+
+export type PlaybackEventName = 'play' | 'pause' | 'progress' | 'seek' | 'ended' | 'hidden' | 'visible';
+
+export interface ApiBalances {
+  available: string;
+  pending_withdrawal: string;
+  total_earned: string;
+  withdrawn: string;
+  deposits: string;
+  accounts: Record<string, string>;
+}
+
+export interface ApiLedgerEntry {
+  id: string;
+  transaction_id: string;
+  account: string;
+  entry_type: string;
+  amount: string;
+  reference_type: string;
+  reference_id: string;
+  description: string | null;
+  created_at: string;
+}
+
+export type ApiNetwork = 'TRC-20' | 'ERC-20' | 'POLYGON';
+
+export interface ApiDeposit {
+  id: string;
+  network: ApiNetwork;
+  asset: string;
+  address: string;
+  expected_amount: string;
+  received_amount: string | null;
+  tx_hash: string | null;
+  confirmations: number;
+  required_confirmations: number;
+  status: 'awaiting_payment' | 'pending' | 'confirmed' | 'underpaid' | 'expired' | 'failed';
+  expires_at: string;
+  confirmed_at: string | null;
+  created_at: string;
+  explorer_url: string | null;
+}
+
+export interface ApiWithdrawal {
+  id: string;
+  network: ApiNetwork;
+  asset: string;
+  address: string;
+  amount: string;
+  fee: string;
+  net_amount: string;
+  status: 'requested' | 'completed' | 'rejected';
+  tx_hash: string | null;
+  rejection_reason: string | null;
+  created_at: string;
+  reviewed_at: string | null;
+  explorer_url: string | null;
+}
+
+export interface ApiPackageFull extends ApiPackage {
+  duration_days: number;
+  description: string | null;
+  is_active: boolean;
+}
+
+export interface ApiSubscription {
+  id: string;
+  status: string;
+  activated_at: string | null;
+  expires_at: string | null;
+  package: ApiPackageFull;
+}
+
+export interface ApiParticipantAnalytics {
+  verified_tasks: number;
+  rejected_tasks: number;
+  average_rating_given: number;
+  total_verified_rewards: number;
+  daily: { day: string; tasks: number; rewards: number }[];
+}
+
+export const campaignsApi = {
+  feed: () => api.get<ApiFeed>('/campaigns/feed'),
+};
+
+export const interactionsApi = {
+  start: (campaignId: string) => api.post<ApiInteraction>('/interactions', { campaign_id: campaignId }),
+  events: (id: string, events: { type: PlaybackEventName; position: number }[]) =>
+    api.post<ApiInteraction>(`/interactions/${id}/events`, { events }),
+  submit: (id: string, body: { rating: number; answer: string; feedback?: string }) =>
+    api.post<ApiInteraction>(`/interactions/${id}/submit`, body),
+  list: () => api.get<ApiInteraction[]>('/interactions?limit=200'),
+};
+
+export const rewardsApi = {
+  balances: () => api.get<ApiBalances>('/rewards/balances'),
+  ledger: () => api.get<ApiLedgerEntry[]>('/rewards/ledger?limit=200'),
+};
+
+export const packagesApi = {
+  list: () => api.get<ApiPackageFull[]>('/packages'),
+  subscription: () => api.get<ApiSubscription | null>('/packages/subscription'),
+};
+
+export const paymentsApi = {
+  deposits: () => api.get<ApiDeposit[]>('/payments/deposits'),
+  createDeposit: (packageId: string, network: ApiNetwork) =>
+    api.post<ApiDeposit>('/payments/deposits', { package_id: packageId, network }),
+  /** Development only (the API answers 404 elsewhere). */
+  simulateDeposit: (id: string, amount: string) => api.post<ApiDeposit>(`/payments/deposits/${id}/simulate`, { amount }),
+  withdrawals: () => api.get<ApiWithdrawal[]>('/payments/withdrawals'),
+  requestWithdrawal: (amount: string, network: ApiNetwork, address: string) =>
+    api.post<ApiWithdrawal>('/payments/withdrawals', { amount, network, address }),
+};
+
+export const analyticsApi = {
+  me: () => api.get<ApiParticipantAnalytics>('/analytics/me'),
+};
+
+export const profileApi = {
+  update: (body: { full_name: string }) => api.patch<ApiUser>('/users/me', body),
+  changePassword: (current_password: string, new_password: string) =>
+    api.post<void>('/users/me/password', { current_password, new_password }),
+  health: () => api.get<{ status: string; environment?: string }>('/health'),
+};

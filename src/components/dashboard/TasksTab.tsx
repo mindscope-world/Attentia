@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { 
   CheckCircle2, 
   Clock, 
@@ -15,10 +15,12 @@ import {
 } from 'lucide-react';
 import { useDashboard } from '../../context/DashboardContext';
 import { DashboardTask } from '../../types';
-import { AD_MIN_SECONDS, YouTubeAdPlayer } from '../YouTubeAdPlayer';
+import { PlaybackEventType, YouTubeAdPlayer } from '../YouTubeAdPlayer';
 
-// Video ads play for at most AD_MAX_SECONDS and unlock the review after AD_MIN_SECONDS.
-const requiredViewing = (task: DashboardTask) => (task.youtubeId ? AD_MIN_SECONDS : task.durationSeconds || 10);
+// Playback events are sent to the server in batches. The server credits watched time from real
+// forward playback only, so batches must be frequent enough to stay within its clock tolerance.
+const EVENT_FLUSH_MS = 2500;
+const PROGRESS_EVENT_MIN_GAP_MS = 1000;
 
 export const TasksTab: React.FC = () => {
   const { 
@@ -26,12 +28,26 @@ export const TasksTab: React.FC = () => {
     completedToday, 
     dailyTotalQuota, 
     rewardPerTask, 
-    completeTask, 
-    userProfile 
+    startTask,
+    sendPlaybackEvents,
+    submitTask,
+    userProfile,
+    hasActivePackage,
+    isLoading,
+    loadError,
+    setActiveTab,
   } = useDashboard();
 
   const [selectedCategory, setSelectedCategory] = useState<string>('All');
   const [activeModalTask, setActiveModalTask] = useState<DashboardTask | null>(null);
+  // Server-side interaction for the open task: its id and the viewing time the server requires.
+  const [session, setSession] = useState<{ id: string; required: number } | null>(null);
+  const [startError, setStartError] = useState<string | null>(null);
+  const [startingId, setStartingId] = useState<string | null>(null);
+  const [feedbackText, setFeedbackText] = useState('');
+  const [earnedReward, setEarnedReward] = useState<number | null>(null);
+  const eventBuffer = useRef<{ type: PlaybackEventType; position: number }[]>([]);
+  const lastProgressAt = useRef(0);
 
   // Modal interactive state
   const [countdown, setCountdown] = useState<number>(10);
@@ -42,87 +58,140 @@ export const TasksTab: React.FC = () => {
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
   const [submitSuccess, setSubmitSuccess] = useState<boolean>(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  // Set when the server rejected the attempt: it is final for today.
+  const [rejectedFinal, setRejectedFinal] = useState(false);
 
-  const categories = ['All', 'Video Engagement', 'Product Poll', 'App Review', 'Brand Survey'];
+  const categories = ['All', ...Array.from(new Set(tasks.map((t) => t.category))).sort()];
 
   const filteredTasks = tasks.filter(t => 
     selectedCategory === 'All' || t.category === selectedCategory
   );
 
   const remainingQuota = Math.max(0, dailyTotalQuota - completedToday);
-  const progressPercent = Math.min(100, Math.round((completedToday / dailyTotalQuota) * 100));
+  const progressPercent = dailyTotalQuota ? Math.min(100, Math.round((completedToday / dailyTotalQuota) * 100)) : 0;
 
-  // Timer effect when modal opens
+  const requiredViewing = session?.required ?? 0;
+
+  const flushEvents = async () => {
+    if (!session || !eventBuffer.current.length) return;
+    const batch = eventBuffer.current.splice(0);
+    await sendPlaybackEvents(session.id, batch);
+  };
+
+  // Reset modal state and, for non-video creatives, run the viewing countdown.
   useEffect(() => {
-    if (activeModalTask) {
-      setCountdown(requiredViewing(activeModalTask));
-      setTimerFinished(false);
-      setSelectedOption('');
-      setSelectedRating(0);
-      setErrorMsg(null);
-      setSubmitSuccess(false);
+    if (!activeModalTask || !session) return;
+    setCountdown(Math.ceil(session.required));
+    setTimerFinished(false);
+    setSelectedOption('');
+    setSelectedRating(0);
+    setFeedbackText('');
+    setEarnedReward(null);
+    setErrorMsg(null);
+    setSubmitSuccess(false);
+    setRejectedFinal(false);
+    eventBuffer.current = [];
 
-      // Video ads unlock on watched time reported by the player, not on a wall-clock countdown.
-      if (activeModalTask.youtubeId) return;
+    // Video ads unlock on watched time reported by the player, not on a wall-clock countdown.
+    if (activeModalTask.youtubeId) return;
 
-      const interval = setInterval(() => {
-        setCountdown((prev) => {
-          if (prev <= 1) {
-            clearInterval(interval);
-            setTimerFinished(true);
-            return 0;
-          }
-          return prev - 1;
-        });
-      }, 1000);
+    const interval = setInterval(() => {
+      setCountdown((prev) => {
+        if (prev <= 1) {
+          clearInterval(interval);
+          setTimerFinished(true);
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [activeModalTask, session]);
 
-      return () => clearInterval(interval);
+  // Send buffered playback events to the server while the ad plays.
+  useEffect(() => {
+    if (!session) return;
+    const timer = setInterval(() => void flushEvents(), EVENT_FLUSH_MS);
+    return () => clearInterval(timer);
+  }, [session]);
+
+  const handleOpenTask = async (task: DashboardTask) => {
+    if (task.status !== 'available' || startingId) return;
+    setStartError(null);
+    setStartingId(task.id);
+    try {
+      const started = await startTask(task.id);
+      setSession({ id: started.interactionId, required: started.requiredSeconds });
+      setActiveModalTask(task);
+    } catch (e) {
+      setStartError(e instanceof Error ? e.message : 'Could not start this task.');
+    } finally {
+      setStartingId(null);
     }
-  }, [activeModalTask]);
+  };
 
-  const handleOpenTask = (task: DashboardTask) => {
-    if (task.status === 'completed') return;
-    setActiveModalTask(task);
+  const closeModal = () => {
+    void flushEvents();
+    setActiveModalTask(null);
+    setSession(null);
+  };
+
+  const handlePlaybackEvent = (type: PlaybackEventType, position: number) => {
+    if (type === 'progress') {
+      const now = performance.now();
+      if (now - lastProgressAt.current < PROGRESS_EVENT_MIN_GAP_MS) return;
+      lastProgressAt.current = now;
+    }
+    eventBuffer.current.push({ type, position });
   };
 
   const handleWatchedChange = (watched: number) => {
-    if (!activeModalTask) return;
-    const required = requiredViewing(activeModalTask);
-    setCountdown(Math.max(0, Math.ceil(required - watched)));
-    if (watched >= required) {
+    if (!activeModalTask || !session) return;
+    setCountdown(Math.max(0, Math.ceil(session.required - watched)));
+    if (watched >= session.required) {
       setTimerFinished(true);
       setErrorMsg(null);
     }
   };
 
-  const handleSubmitTask = () => {
-    if (!activeModalTask) return;
-    if (activeModalTask.youtubeId && !timerFinished) {
-      setErrorMsg('Please finish watching the required part of the video before submitting.');
+  const handleSubmitTask = async () => {
+    if (!activeModalTask || !session) return;
+    if (!timerFinished) {
+      setErrorMsg('Please finish the required viewing time before submitting.');
       return;
     }
     if (selectedRating < 1 || selectedRating > 5) {
       setErrorMsg('Please rate the ad from 1 to 5 stars before submitting.');
       return;
     }
-    if (!activeModalTask.youtubeId && !selectedOption) {
+    if (!selectedOption) {
       setErrorMsg('Please select an option to submit your verification.');
+      return;
+    }
+    if (activeModalTask.requiresFeedback && feedbackText.trim().length < 10) {
+      setErrorMsg('Please write at least 10 characters of feedback.');
       return;
     }
 
     setIsSubmitting(true);
     setErrorMsg(null);
+    await flushEvents(); // make sure the server has the latest playback position
+    const result = await submitTask(session.id, selectedRating, selectedOption, feedbackText.trim());
+    setIsSubmitting(false);
 
-    setTimeout(() => {
-      completeTask(activeModalTask.id, selectedRating, selectedOption);
-      setIsSubmitting(false);
+    if (result.ok) {
+      setEarnedReward(result.reward ?? 0);
       setSubmitSuccess(true);
-
       setTimeout(() => {
         setActiveModalTask(null);
+        setSession(null);
         setSubmitSuccess(false);
-      }, 1200);
-    }, 700);
+      }, 1500);
+    } else {
+      // The server verdict is final for today: show why, then let the participant close.
+      setErrorMsg(`Not verified: ${result.message}`);
+      setRejectedFinal(true);
+    }
   };
 
   return (
@@ -181,6 +250,24 @@ export const TasksTab: React.FC = () => {
         </div>
       </div>
 
+      {!hasActivePackage && !isLoading && (
+        <div className="rounded-2xl bg-amber-950/30 border border-amber-800/50 p-4 text-xs text-amber-200 flex flex-wrap items-center justify-between gap-3">
+          <span>You need an active participation package to earn rewards from tasks.</span>
+          <button
+            onClick={() => setActiveTab('deposits-withdrawals')}
+            className="px-3 py-1.5 rounded-lg bg-amber-900/50 hover:bg-amber-800/60 border border-amber-700/50 font-bold cursor-pointer"
+          >
+            Choose a package
+          </button>
+        </div>
+      )}
+      {(startError || loadError) && (
+        <div role="alert" className="rounded-2xl bg-rose-950/40 border border-rose-800/50 p-4 text-xs text-rose-300 flex items-center gap-2">
+          <AlertCircle className="w-4 h-4 shrink-0" />
+          <span>{startError ?? loadError}</span>
+        </div>
+      )}
+
       {/* Category Filter Tabs */}
       <div className="flex items-center gap-2 overflow-x-auto pb-2 scrollbar-none">
         {categories.map((cat) => (
@@ -199,9 +286,12 @@ export const TasksTab: React.FC = () => {
       </div>
 
       {/* Task Cards Grid */}
+      {!isLoading && filteredTasks.length === 0 && (
+        <p className="py-12 text-center text-sm text-[#71789c]">No sponsored tasks are available right now. Check back soon.</p>
+      )}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
         {filteredTasks.map((task) => {
-          const isDone = task.status === 'completed';
+          const isDone = task.status !== 'available';
           return (
             <div
               key={task.id}
@@ -214,8 +304,15 @@ export const TasksTab: React.FC = () => {
               <div>
                 {/* Card Header */}
                 <div className="flex items-center justify-between gap-2 mb-3">
-                  <span className="text-[10px] font-bold uppercase tracking-wider text-[#a488ff] bg-[#1f1b40] px-2.5 py-0.5 rounded border border-[#3c3175]">
-                    {task.category}
+                  <span className="flex items-center gap-1.5">
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-[#a488ff] bg-[#1f1b40] px-2.5 py-0.5 rounded border border-[#3c3175]">
+                      {task.category}
+                    </span>
+                    {task.isDemo && (
+                      <span className="text-[10px] font-bold uppercase tracking-wider text-amber-300 bg-amber-950/50 px-2 py-0.5 rounded border border-amber-800/50">
+                        Demo
+                      </span>
+                    )}
                   </span>
                   <div className="flex items-center gap-1 text-xs font-mono font-bold text-emerald-400">
                     <span>+${task.reward.toFixed(2)}</span>
@@ -240,7 +337,7 @@ export const TasksTab: React.FC = () => {
                 <div className="flex items-center justify-between text-xs text-[#71789c]">
                   <span className="flex items-center gap-1.5">
                     <Clock className="w-3.5 h-3.5 text-[#9a7ffd]" />
-                    <span>{task.durationSeconds}s duration</span>
+                    <span>{task.durationSeconds}s viewing</span>
                   </span>
                   <span className="flex items-center gap-1 text-[#8b92b6]">
                     <Award className="w-3.5 h-3.5 text-amber-400" />
@@ -249,17 +346,25 @@ export const TasksTab: React.FC = () => {
                 </div>
 
                 {isDone ? (
-                  <div className="w-full py-2.5 rounded-xl bg-[#112022] border border-emerald-800/40 text-emerald-400 text-xs font-bold flex items-center justify-center gap-1.5">
-                    <CheckCircle2 className="w-4 h-4" />
-                    <span>Completed & Credited</span>
-                  </div>
+                  task.status === 'rejected' ? (
+                    <div className="w-full py-2.5 rounded-xl bg-rose-950/30 border border-rose-800/40 text-rose-300 text-xs font-bold flex items-center justify-center gap-1.5">
+                      <AlertCircle className="w-4 h-4" />
+                      <span>Not verified today</span>
+                    </div>
+                  ) : (
+                    <div className="w-full py-2.5 rounded-xl bg-[#112022] border border-emerald-800/40 text-emerald-400 text-xs font-bold flex items-center justify-center gap-1.5">
+                      <CheckCircle2 className="w-4 h-4" />
+                      <span>Completed & Credited</span>
+                    </div>
+                  )
                 ) : (
                   <button
                     onClick={() => handleOpenTask(task)}
-                    className="w-full py-2.5 rounded-xl bg-gradient-to-r from-[#6b45f6] to-[#8f6dff] hover:from-[#7651fc] hover:to-[#9f80ff] text-white text-xs font-bold transition-all shadow-md shadow-[#734eff]/25 flex items-center justify-center gap-2 cursor-pointer"
+                    disabled={!!startingId}
+                    className="w-full py-2.5 rounded-xl bg-gradient-to-r from-[#6b45f6] to-[#8f6dff] hover:from-[#7651fc] hover:to-[#9f80ff] text-white text-xs font-bold transition-all shadow-md shadow-[#734eff]/25 flex items-center justify-center gap-2 cursor-pointer disabled:opacity-60"
                   >
                     <Play className="w-3.5 h-3.5 fill-current" />
-                    <span>Engage & Earn</span>
+                    <span>{startingId === task.id ? 'Starting…' : 'Engage & Earn'}</span>
                   </button>
                 )}
               </div>
@@ -281,10 +386,15 @@ export const TasksTab: React.FC = () => {
                 <span className="text-xs text-[#71789c]">
                   Sponsor: <strong className="text-white">{activeModalTask.sponsor}</strong>
                 </span>
+                {activeModalTask.isDemo && (
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-amber-300 bg-amber-950/50 px-2 py-0.5 rounded border border-amber-800/50">
+                    Demonstration content
+                  </span>
+                )}
               </div>
 
               <button
-                onClick={() => setActiveModalTask(null)}
+                onClick={closeModal}
                 className="p-1.5 rounded-xl text-[#7c83a4] hover:text-white hover:bg-[#1f213d] transition-colors cursor-pointer"
               >
                 <X className="w-5 h-5" />
@@ -311,6 +421,7 @@ export const TasksTab: React.FC = () => {
                   key={activeModalTask.id}
                   videoId={activeModalTask.youtubeId}
                   onWatchedChange={handleWatchedChange}
+                  onPlaybackEvent={handlePlaybackEvent}
                 />
               )}
 
@@ -369,8 +480,8 @@ export const TasksTab: React.FC = () => {
                 </div>
               </div>
 
-              {/* Poll question: video ads only ask for a rating */}
-              {!activeModalTask.youtubeId && (
+              {/* Poll question: the server requires a valid answer for every task */}
+              {(
                 <div>
                   <label className="text-xs font-semibold text-white block mb-2">
                     {activeModalTask.question}
@@ -399,6 +510,23 @@ export const TasksTab: React.FC = () => {
                 </div>
               )}
 
+              {activeModalTask.requiresFeedback && (
+                <div>
+                  <label className="text-xs font-semibold text-white block mb-1.5" htmlFor="task-feedback">
+                    Written feedback <span className="text-rose-400" aria-hidden="true">*</span>
+                  </label>
+                  <textarea
+                    id="task-feedback"
+                    rows={3}
+                    maxLength={2000}
+                    value={feedbackText}
+                    onChange={(e) => setFeedbackText(e.target.value)}
+                    placeholder="Tell the sponsor what you thought (at least 10 characters)"
+                    className="w-full bg-[#0f1020] border border-[#1e213d] rounded-xl p-3 text-xs text-white focus:border-[#7858fc] outline-none"
+                  />
+                </div>
+              )}
+
               {errorMsg && (
                 <div className="p-3 rounded-xl bg-rose-950/40 border border-rose-800/50 text-rose-300 text-xs flex items-center gap-2">
                   <AlertCircle className="w-4 h-4 shrink-0" />
@@ -407,26 +535,36 @@ export const TasksTab: React.FC = () => {
               )}
 
               {/* Submit CTA */}
-              <button
-                type="button"
-                onClick={handleSubmitTask}
-                disabled={isSubmitting || submitSuccess}
-                className="w-full py-3.5 rounded-full bg-gradient-to-r from-[#6b45f6] to-[#8f6dff] hover:from-[#7651fc] hover:to-[#9f80ff] text-white text-xs font-bold tracking-wide transition-all shadow-lg shadow-[#734eff]/30 flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
-              >
-                {isSubmitting ? (
-                  <span>Submitting to validator node...</span>
-                ) : submitSuccess ? (
-                  <span className="flex items-center gap-1.5 text-white">
-                    <CheckCircle2 className="w-4 h-4 text-emerald-400" />
-                    Reward Credited (+$0.50 USDT)!
-                  </span>
-                ) : (
-                  <>
-                    <span>Submit Evaluation & Claim +${activeModalTask.reward.toFixed(2)} USDT</span>
-                    <ArrowRight className="w-4 h-4" />
-                  </>
-                )}
-              </button>
+              {rejectedFinal ? (
+                <button
+                  type="button"
+                  onClick={closeModal}
+                  className="w-full py-3.5 rounded-full bg-[#1d203b] hover:bg-[#282c52] text-white text-xs font-bold tracking-wide border border-[#2e335b] cursor-pointer"
+                >
+                  Close
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={handleSubmitTask}
+                  disabled={isSubmitting || submitSuccess}
+                  className="w-full py-3.5 rounded-full bg-gradient-to-r from-[#6b45f6] to-[#8f6dff] hover:from-[#7651fc] hover:to-[#9f80ff] text-white text-xs font-bold tracking-wide transition-all shadow-lg shadow-[#734eff]/30 flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
+                >
+                  {isSubmitting ? (
+                    <span>Verifying with the server…</span>
+                  ) : submitSuccess ? (
+                    <span className="flex items-center gap-1.5 text-white">
+                      <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                      Reward credited (+${(earnedReward ?? 0).toFixed(2)} USDT)!
+                    </span>
+                  ) : (
+                    <>
+                      <span>Submit Evaluation & Claim +${activeModalTask.reward.toFixed(2)} USDT</span>
+                      <ArrowRight className="w-4 h-4" />
+                    </>
+                  )}
+                </button>
+              )}
             </div>
           </div>
         </div>

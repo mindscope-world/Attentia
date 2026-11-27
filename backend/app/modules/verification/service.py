@@ -16,6 +16,7 @@ from sqlalchemy.orm import Session
 
 from app.modules.assets.models import AssetKind, AssetStatus
 from app.modules.campaigns.models import Campaign
+from app.modules.campaigns.defaults import AD_MAX_SECONDS, AD_UNLOCK_SECONDS
 from app.modules.campaigns.service import budget_remaining, is_live_clause, utc_today
 from app.modules.packages.models import Subscription, SubscriptionStatus
 from app.modules.rewards.service import calculate_reward, credit_reward, lock_user
@@ -45,6 +46,11 @@ def required_seconds(campaign: Campaign) -> float:
         base = asset.duration_seconds
     else:
         base = float(campaign.display_seconds)
+    # Platform rule: ads are cut at 30 s and unlock the review at 29 s. Anything that runs for 30 s or
+    # more needs exactly 29 s of viewing, whatever the campaign's percentage says; shorter ads need
+    # their configured share of the length.
+    if base >= AD_MAX_SECONDS:
+        return AD_UNLOCK_SECONDS
     return round(base * campaign.min_watch_pct, 2)
 
 

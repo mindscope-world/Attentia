@@ -3,11 +3,12 @@ import uuid
 from fastapi import APIRouter, HTTPException, status
 from sqlalchemy import select
 
-from app.core.security import create_access_token
+from app.core.security import create_access_token, hash_password, verify_password
 from app.modules.users.deps import AdminUser, CurrentUser, DbSession
 from app.modules.users.models import User
 from app.modules.users.schemas import (
     AdminUserUpdateIn,
+    ChangePasswordIn,
     LoginIn,
     RegisterIn,
     TokenOut,
@@ -62,6 +63,16 @@ async def update_me(body: UserUpdateIn, user: CurrentUser, session: DbSession) -
         setattr(user, field, value)
     await session.commit()
     return user
+
+
+@users_router.post("/me/password", status_code=status.HTTP_204_NO_CONTENT)
+async def change_password(body: ChangePasswordIn, user: CurrentUser, session: DbSession) -> None:
+    if not verify_password(body.current_password, user.password_hash):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Current password is incorrect.")
+    if body.current_password == body.new_password:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Choose a password you have not used before.")
+    user.password_hash = hash_password(body.new_password)
+    await session.commit()
 
 
 @users_router.get("", response_model=list[UserOut])

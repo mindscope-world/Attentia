@@ -14,6 +14,7 @@ from app.modules.adlinks import discovery
 from app.modules.adlinks.models import ACTIVE, DECLINED, PAUSED, PENDING, AdLink
 from app.modules.assets import youtube
 from app.modules.assets.models import Asset, AssetKind, AssetStatus
+from app.modules.campaigns.defaults import DEFAULT_DISPLAY_SECONDS
 from app.modules.campaigns.models import Campaign, CampaignStatus
 from app.modules.users.deps import AdminUser, DbSession
 from app.modules.verification.models import Interaction
@@ -80,12 +81,11 @@ def _out(link: AdLink, campaign: Campaign | None) -> AdLinkOut:
 async def sync_existing(session) -> None:
     """Make sure every YouTube creative already on the platform has a stored link."""
     known = set(await session.scalars(select(AdLink.youtube_id)))
-    assets = [
-        a
-        for a in await session.scalars(select(Asset).where(Asset.kind == AssetKind.youtube, Asset.youtube_id.is_not(None)))
-        if a.youtube_id not in known
-    ]
-    for a in assets:
+    assets: dict[str, Asset] = {}
+    for a in await session.scalars(select(Asset).where(Asset.kind == AssetKind.youtube, Asset.youtube_id.is_not(None))):
+        if a.youtube_id not in known:
+            assets.setdefault(a.youtube_id, a)  # several assets can share one video; keep one link
+    for a in assets.values():
         campaign = await session.scalar(select(Campaign).where(Campaign.asset_id == a.id).order_by(Campaign.created_at))
         session.add(
             AdLink(
@@ -206,7 +206,7 @@ async def _publish(session, link: AdLink, admin_id: uuid.UUID, body: DecisionIn,
         reward_rate=body.reward_rate,
         budget_total=body.budget_total,
         budget_spent=Decimal("0"),
-        display_seconds=min(int(link.duration_seconds or 15), 600) or 15,
+        display_seconds=DEFAULT_DISPLAY_SECONDS,
         rating_prompt="How relevant was this ad to you?",
         question="Did this ad clearly show what it was promoting?",
         options=["Yes", "Somewhat", "No"],
