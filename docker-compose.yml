@@ -14,6 +14,7 @@ x-backend-env: &backend-env
   S3_BUCKET: attentia-media
   ADDRESS_DERIVATION_SECRET: ${ADDRESS_DERIVATION_SECRET:-dev-address-secret}
   YOUTUBE_API_KEY: ${YOUTUBE_API_KEY:-}
+  SEED_ADMIN_PASSWORD: ${SEED_ADMIN_PASSWORD:-}
   CORS_ORIGINS: '["http://localhost:3000","http://localhost:8080"]'
 
 x-backend: &backend

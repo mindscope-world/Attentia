@@ -20,6 +20,7 @@ import { DashboardProvider } from './context/DashboardContext';
 import { ThemeProvider } from './context/ThemeContext';
 import { useAuth } from './context/AuthContext';
 import { DashboardLayout } from './components/dashboard/DashboardLayout';
+import { AdminDashboard } from './components/admin/AdminDashboard';
 import { Navigate, Route, Routes, useLocation, useNavigate } from 'react-router';
 
 export default function App() {
@@ -100,6 +101,18 @@ export default function App() {
               <div className="min-h-screen bg-[#090a16]" />
             ) : isAuthenticated ? (
               <DashboardLayout onBackToLanding={() => navigate('/')} onLogout={handleLogout} />
+            ) : (
+              <Navigate to="/" replace state={{ requireLogin: true }} />
+            )
+          }
+        />
+        <Route
+          path="/admin/:tab?"
+          element={
+            isLoading ? (
+              <div className="min-h-screen bg-[#090a16]" />
+            ) : isAuthenticated ? (
+              <AdminDashboard onLogout={handleLogout} />
             ) : (
               <Navigate to="/" replace state={{ requireLogin: true }} />
             )

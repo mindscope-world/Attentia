@@ -67,8 +67,14 @@ def run() -> None:
                 s.add(Package(**p))
         s.flush()
 
-        def ensure_user(email, username, password, role, kyc):
+        def ensure_user(email, username, password, role, kyc, sync_password=False):
             u = s.scalar(select(User).where(or_(User.email == email, User.username == username)))
+            if u is not None and sync_password:
+                # An explicitly configured admin password always wins over the stored one.
+                u.password_hash = hash_password(password)
+                u.is_active = True
+                u.banned_at = None
+                u.ban_reason = None
             if u is None:
                 u = User(email=email, username=username, password_hash=hash_password(password), role=role,
                          kyc_status=kyc, full_name=username.title())
@@ -80,7 +86,7 @@ def run() -> None:
             # Production: packages only, plus an admin when real credentials are supplied.
             if len(settings.seed_admin_password) >= 12:
                 ensure_user(settings.seed_admin_email, settings.seed_admin_username,
-                            settings.seed_admin_password, Role.admin, KycStatus.verified)
+                            settings.seed_admin_password, Role.admin, KycStatus.verified, sync_password=True)
             s.commit()
             print("Seed complete (production: packages/admin only).")
             return
@@ -93,7 +99,7 @@ def run() -> None:
             print(f"Generated dev admin password for {settings.seed_admin_email}: {admin_password}")
         if admin_password:
             ensure_user(settings.seed_admin_email, settings.seed_admin_username, admin_password,
-                        Role.admin, KycStatus.verified)
+                        Role.admin, KycStatus.verified, sync_password=bool(settings.seed_admin_password))
         participant = ensure_user("demo@attentia.dev", "demo", "demo-password", Role.participant, KycStatus.verified)
         ensure_user("advertiser@attentia.dev", "advertiser", "advertiser-password", Role.advertiser, KycStatus.verified)
 

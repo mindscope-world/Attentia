@@ -26,6 +26,8 @@ import { ActivitiesTab } from './ActivitiesTab';
 import { NetworkTab } from './NetworkTab';
 import { SettingsTab } from './SettingsTab';
 import { ThemeToggle } from '../ThemeToggle';
+import { useAuth } from '../../context/AuthContext';
+import { useNavigate } from 'react-router';
 
 interface DashboardLayoutProps {
   onBackToLanding: () => void;
@@ -44,6 +46,8 @@ export const DashboardLayout: React.FC<DashboardLayoutProps> = ({ onBackToLandin
     setNotification 
   } = useDashboard();
 
+  const { user } = useAuth();
+  const navigate = useNavigate();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   const remainingTasks = Math.max(0, dailyTotalQuota - completedToday);
@@ -129,6 +133,15 @@ export const DashboardLayout: React.FC<DashboardLayoutProps> = ({ onBackToLandin
               </span>
             </div>
           </div>
+
+          {user?.role === 'admin' && (
+            <button
+              onClick={() => navigate('/admin')}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-amber-950/50 hover:bg-amber-900/60 text-xs font-bold text-amber-300 border border-amber-700/50 cursor-pointer"
+            >
+              <ShieldCheck className="w-3.5 h-3.5" /> Admin
+            </button>
+          )}
 
           {/* Switch to Landing Page button */}
           <button
