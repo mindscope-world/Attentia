@@ -10,6 +10,7 @@ from app.core import cache, storage
 from app.core.config import settings
 from app.core.db import SessionLocal
 from app.modules.analytics.router import router as analytics_router
+from app.modules.adlinks.router import router as adlinks_router
 from app.modules.admin.router import router as admin_router
 from app.modules.assets.router import router as assets_router
 from app.modules.campaigns.router import router as campaigns_router
@@ -50,6 +51,7 @@ for r in (
     payments_router,
     analytics_router,
     admin_router,
+    adlinks_router,
 ):
     app.include_router(r, prefix=settings.api_prefix)
 

@@ -82,6 +82,32 @@ export interface AdminCampaign {
   created_at: string;
 }
 
+export type LinkStatus = 'pending' | 'active' | 'paused' | 'declined' | 'removed' | 'completed' | 'expired';
+
+export interface AdLink {
+  id: string;
+  youtube_id: string;
+  url: string;
+  title: string | null;
+  channel_title: string | null;
+  description: string | null;
+  thumbnail_url: string | null;
+  embed_url: string;
+  duration_seconds: number | null;
+  category: string | null;
+  source: 'fetched' | 'existing';
+  status: LinkStatus;
+  campaign_id: string | null;
+  created_at: string;
+  decided_at: string | null;
+}
+
+export interface AdDefaults {
+  reward_rate: string;
+  budget_total: string;
+  is_demo: boolean;
+}
+
 export interface NewAd {
   url: string;
   durationSeconds?: number;
@@ -144,6 +170,11 @@ export const adminApi = {
   setCampaignStatus: (id: string, status: CampaignStatus) =>
     api.post<AdminCampaign>(`/campaigns/${id}/status`, { status }),
   asset: (id: string) => api.get<ApiAsset>(`/assets/${id}`),
+  adLinks: (f: { status?: string; q?: string } = {}) => api.get<AdLink[]>(`/admin/ad-links${qs({ status_: f.status, q: f.q })}`),
+  fetchAds: (count = 20) => api.post<{ added: number; items: AdLink[] }>('/admin/ad-links/fetch', { count }),
+  approveLink: (id: string, d: AdDefaults) => api.post<AdLink>(`/admin/ad-links/${id}/approve`, d),
+  pauseLink: (id: string, d: AdDefaults) => api.post<AdLink>(`/admin/ad-links/${id}/pause`, d),
+  declineLink: (id: string, force = false) => api.post<AdLink>(`/admin/ad-links/${id}/decline${qs({ force })}`),
   deleteCampaign: (id: string, force = false) => api.delete<void>(`/admin/campaigns/${id}${qs({ force })}`),
 
   /** Register the YouTube video, create the campaign and publish it. */

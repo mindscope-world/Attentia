@@ -1,4 +1,4 @@
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useRef, useState } from 'react';
 import { Navigate, useNavigate, useParams } from 'react-router';
 import { ArrowLeft, Film, LayoutDashboard, LogOut, Users, Wallet, X } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
@@ -20,9 +20,11 @@ export const AdminDashboard: React.FC<{ onLogout: () => void }> = ({ onLogout })
   const navigate = useNavigate();
   const [toast, setToast] = useState<{ text: string; error: boolean } | null>(null);
 
+  const toastTimer = useRef<ReturnType<typeof setTimeout>>();
   const notify = useCallback((text: string, error = false) => {
     setToast({ text, error });
-    setTimeout(() => setToast(null), 5000);
+    clearTimeout(toastTimer.current);
+    toastTimer.current = setTimeout(() => setToast(null), 5000);
   }, []);
 
   if (user?.role !== 'admin') return <Navigate to="/dashboard" replace />;

@@ -1,5 +1,6 @@
 """Import every module's models so SQLAlchemy metadata (and Alembic) sees all tables."""
 
+from app.modules.adlinks.models import AdLink  # noqa: F401
 from app.modules.assets.models import Asset  # noqa: F401
 from app.modules.campaigns.models import Campaign  # noqa: F401
 from app.modules.packages.models import Package, Subscription  # noqa: F401
