@@ -4,6 +4,7 @@ from decimal import Decimal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from app.modules.campaigns.defaults import DEFAULT_DISPLAY_SECONDS, DEFAULT_MIN_WATCH_PCT
 from app.modules.campaigns.models import CampaignStatus
 
 
@@ -20,8 +21,8 @@ class CampaignBase(BaseModel):
     daily_interaction_limit: int = Field(default=1000, gt=0)
     reward_rate: Decimal = Field(gt=0)
     budget_total: Decimal = Field(gt=0)
-    min_watch_pct: float = Field(default=0.9, ge=0, le=1)
-    display_seconds: int = Field(default=15, ge=1, le=600)
+    min_watch_pct: float = Field(default=DEFAULT_MIN_WATCH_PCT, ge=0, le=1)
+    display_seconds: int = Field(default=DEFAULT_DISPLAY_SECONDS, ge=1, le=600)
     requires_feedback: bool = False
     rating_prompt: str = Field(max_length=300)
     question: str = Field(max_length=300)

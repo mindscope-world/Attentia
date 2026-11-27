@@ -26,6 +26,8 @@ import { ActivitiesTab } from './ActivitiesTab';
 import { NetworkTab } from './NetworkTab';
 import { SettingsTab } from './SettingsTab';
 import { ThemeToggle } from '../ThemeToggle';
+import { useAuth } from '../../context/AuthContext';
+import { useNavigate } from 'react-router';
 
 interface DashboardLayoutProps {
   onBackToLanding: () => void;
@@ -41,9 +43,12 @@ export const DashboardLayout: React.FC<DashboardLayoutProps> = ({ onBackToLandin
     completedToday, 
     dailyTotalQuota, 
     notification, 
-    setNotification 
+    setNotification,
+    packages,
   } = useDashboard();
 
+  const { user } = useAuth();
+  const navigate = useNavigate();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   const remainingTasks = Math.max(0, dailyTotalQuota - completedToday);
@@ -130,6 +135,15 @@ export const DashboardLayout: React.FC<DashboardLayoutProps> = ({ onBackToLandin
             </div>
           </div>
 
+          {user?.role === 'admin' && (
+            <button
+              onClick={() => navigate('/admin')}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-amber-950/50 hover:bg-amber-900/60 text-xs font-bold text-amber-300 border border-amber-700/50 cursor-pointer"
+            >
+              <ShieldCheck className="w-3.5 h-3.5" /> Admin
+            </button>
+          )}
+
           {/* Switch to Landing Page button */}
           <button
             onClick={onBackToLanding}
@@ -156,12 +170,12 @@ export const DashboardLayout: React.FC<DashboardLayoutProps> = ({ onBackToLandin
             className="flex items-center gap-2 p-1 sm:pr-3 rounded-full bg-[#161832] border border-[#272b53] hover:border-[#404683] transition-colors cursor-pointer"
           >
             <div className="w-7 h-7 rounded-full bg-gradient-to-tr from-[#7c5cfc] to-[#a38aff] flex items-center justify-center text-white text-xs font-bold">
-              {userProfile.name.charAt(0)}
+              {(userProfile.name || '?').charAt(0).toUpperCase()}
             </div>
             <div className="hidden sm:block text-left">
               <span className="text-xs font-semibold text-white block leading-none">{userProfile.name}</span>
               <span className="text-[10px] text-emerald-400 font-mono flex items-center gap-0.5">
-                <ShieldCheck className="w-3 h-3" /> {userProfile.tier}
+                <ShieldCheck className="w-3 h-3" /> {userProfile.tier === 'none' ? 'No package' : userProfile.tier}
               </span>
             </div>
           </div>
@@ -211,12 +225,12 @@ export const DashboardLayout: React.FC<DashboardLayoutProps> = ({ onBackToLandin
                 Current Tier
               </span>
               <span className="text-xs font-mono font-bold text-white bg-[#1e2140] px-2 py-0.5 rounded">
-                ${userProfile.tier === 'starter' ? '25' : userProfile.tier === 'growth' ? '100' : '500'}
+                {userProfile.tier === 'none' ? '—' : `$${Number(packages.find((p) => p.code === userProfile.tier)?.price ?? 0).toFixed(0)}`}
               </span>
             </div>
 
             <div className="text-sm font-bold text-white capitalize">
-              {userProfile.tier} Package
+              {userProfile.tier === 'none' ? 'No active package' : `${userProfile.tier} Package`}
             </div>
 
             <div className="space-y-1.5">

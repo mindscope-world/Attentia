@@ -7,6 +7,7 @@ interface YTPlayer {
   pauseVideo(): void;
   mute(): void;
   unMute(): void;
+  setVolume(volume: number): void;
   getPlayerState(): number;
   getCurrentTime(): number;
   getDuration(): number;
@@ -200,6 +201,10 @@ export const YouTubeAdPlayer: React.FC<YouTubeAdPlayerProps> = ({
             onReady: (e) => {
               if (cancelled) return;
               setReady(true);
+              // Ads always start with sound on, whatever state the embed was left in.
+              e.target.unMute();
+              e.target.setVolume(100);
+              setMuted(false);
               e.target.playVideo();
               // Browsers block autoplay with sound unless the page has enough user engagement.
               // If the unmuted start was refused, start muted; the viewer can unmute.

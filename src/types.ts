@@ -24,13 +24,16 @@ export interface ActivityItem {
   status: 'completed' | 'processing' | 'failed';
   txHash?: string;
   details?: string;
+  /** ISO timestamp, used for sorting and exports. */
+  at?: string;
 }
 
 export interface DashboardTask {
   id: string;
   title: string;
   sponsor: string;
-  category: 'Video Engagement' | 'Product Poll' | 'App Review' | 'Brand Survey';
+  /** Industry of the campaign, as set on the server (e.g. Technology, Travel). */
+  category: string;
   reward: number;
   durationSeconds: number;
   description: string;
@@ -40,7 +43,12 @@ export interface DashboardTask {
   ratingPrompt: string;
   question: string;
   options: string[];
-  status: 'available' | 'completed';
+  /** completed = verified today; rejected = attempted today but not verified (one attempt per day). */
+  status: 'available' | 'completed' | 'rejected';
+  /** Demonstration content: shown with a visible label. */
+  isDemo: boolean;
+  /** Campaign requires written feedback of at least 10 characters. */
+  requiresFeedback: boolean;
 }
 
 export interface WithdrawalRecord {
@@ -51,8 +59,10 @@ export interface WithdrawalRecord {
   network: 'TRC-20' | 'ERC-20' | 'POLYGON';
   address: string;
   requestedAt: string;
-  status: 'submitted' | 'verifying' | 'dispatched' | 'completed';
+  status: 'submitted' | 'verifying' | 'dispatched' | 'completed' | 'rejected';
   txHash?: string;
+  rejectionReason?: string;
+  explorerUrl?: string;
 }
 
 export interface DepositRecord {
@@ -62,8 +72,9 @@ export interface DepositRecord {
   address: string;
   txHash: string;
   timestamp: string;
-  status: 'confirmed' | 'pending';
-  tierUpgradedTo?: 'starter' | 'growth' | 'pro';
+  status: 'confirmed' | 'pending' | 'awaiting payment' | 'underpaid' | 'expired' | 'failed';
+  tierUpgradedTo?: string;
+  explorerUrl?: string;
 }
 
 export interface ReferralUser {
@@ -81,9 +92,10 @@ export interface UserProfile {
   name: string;
   email: string;
   accountId: string;
-  tier: 'starter' | 'growth' | 'pro';
+  /** Code of the active participation package, or 'none'. */
+  tier: string;
   memberSince: string;
-  kycLevel: 'Tier 1 (Basic)' | 'Tier 2 (Verified)' | 'Tier 3 (Institutional)';
+  kycLevel: string;
   twoFactorEnabled: boolean;
   walletWhitelist: {
     trc20: string;

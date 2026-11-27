@@ -68,6 +68,10 @@ export const NetworkTab: React.FC = () => {
         </p>
       </div>
 
+      <div role="note" className="rounded-2xl bg-amber-950/30 border border-amber-800/50 px-4 py-3 text-xs text-amber-200">
+        The referral programme is not live yet. The members and commissions below are illustrative preview data and are not part of your balance.
+      </div>
+
       {/* Referral Link & Share Box */}
       <div className="rounded-3xl bg-gradient-to-r from-[#171838] via-[#14152f] to-[#1d173c] border-2 border-[#2f3361] p-6 sm:p-8 shadow-xl">
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-center">

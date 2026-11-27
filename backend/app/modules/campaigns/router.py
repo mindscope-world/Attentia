@@ -20,7 +20,7 @@ from app.modules.campaigns.service import live_campaigns_stmt, utc_today
 from app.modules.rewards.service import calculate_reward
 from app.modules.users.deps import AdvertiserOrAdmin, CurrentUser, DbSession
 from app.modules.users.models import Role, User
-from app.modules.verification.models import Interaction
+from app.modules.verification.models import Interaction, InteractionStatus
 from app.modules.verification.service import daily_quota
 
 router = APIRouter(prefix="/campaigns", tags=["campaigns"])
@@ -84,7 +84,10 @@ async def feed(user: CurrentUser, session: DbSession) -> FeedOut:
     done_today = set(
         await session.scalars(
             select(Interaction.campaign_id).where(
-                Interaction.user_id == user.id, Interaction.day == utc_today()
+                Interaction.user_id == user.id,
+                Interaction.day == utc_today(),
+                # An attempt that was started but not submitted can still be resumed.
+                Interaction.status != InteractionStatus.started,
             )
         )
     )

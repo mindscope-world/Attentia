@@ -38,7 +38,11 @@ async def _quick_campaign(client, admin, **overrides) -> str:
 
 async def test_health(client):
     r = await client.get("/health")
-    assert r.json() == {"status": "ok", "database": True, "redis": True, "storage": True}
+    body = r.json()
+    assert {k: body[k] for k in ("status", "database", "redis", "storage")} == {
+        "status": "ok", "database": True, "redis": True, "storage": True,
+    }
+    assert body["environment"] == "test"
 
 
 async def test_register_login_and_me(client):

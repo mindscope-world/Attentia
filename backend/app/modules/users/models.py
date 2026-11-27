@@ -1,6 +1,8 @@
 import enum
 
-from sqlalchemy import Boolean, Enum, String
+from datetime import datetime
+
+from sqlalchemy import Boolean, DateTime, Enum, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.db import Base, IdMixin, TimestampMixin
@@ -32,3 +34,6 @@ class User(IdMixin, TimestampMixin, Base):
     )
     two_factor_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    # Set when an admin bans the account (is_active is also False). Cleared on unban.
+    banned_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    ban_reason: Mapped[str | None] = mapped_column(String(300))

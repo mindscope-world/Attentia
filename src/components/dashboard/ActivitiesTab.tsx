@@ -17,7 +17,12 @@ import { useDashboard } from '../../context/DashboardContext';
 import { ActivityItem } from '../../types';
 
 export const ActivitiesTab: React.FC = () => {
-  const { activities } = useDashboard();
+  const { activities, withdrawals } = useDashboard();
+
+  const amountOf = (a: ActivityItem) => parseFloat(a.amount.replace(/[+$]/g, '')) || 0;
+  const taskRewards = activities.filter((a) => a.type === 'ad' && a.amount.startsWith('+')).reduce((sum, a) => sum + amountOf(a), 0);
+  const referralCommissions = activities.filter((a) => a.type === 'referral').reduce((sum, a) => sum + amountOf(a), 0);
+  const settledWithdrawals = withdrawals.filter((w) => w.status === 'completed').reduce((sum, w) => sum + w.amount, 0);
   const [filterType, setFilterType] = useState<'all' | 'ad' | 'referral' | 'withdrawal' | 'deposit'>('all');
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [selectedReceipt, setSelectedReceipt] = useState<ActivityItem | null>(null);
@@ -79,15 +84,15 @@ export const ActivitiesTab: React.FC = () => {
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
         <div className="p-4 rounded-2xl bg-[#121326] border border-[#212443]">
           <span className="text-[11px] text-[#787f9f] block">Total Task Rewards</span>
-          <span className="text-lg font-bold text-emerald-400 font-mono">+$241.00</span>
+          <span className="text-lg font-bold text-emerald-400 font-mono">+${taskRewards.toFixed(2)}</span>
         </div>
         <div className="p-4 rounded-2xl bg-[#121326] border border-[#212443]">
           <span className="text-[11px] text-[#787f9f] block">Referral Commissions</span>
-          <span className="text-lg font-bold text-sky-400 font-mono">+$88.40</span>
+          <span className="text-lg font-bold text-sky-400 font-mono">+${referralCommissions.toFixed(2)}</span>
         </div>
         <div className="p-4 rounded-2xl bg-[#121326] border border-[#212443]">
           <span className="text-[11px] text-[#787f9f] block">Settled Withdrawals</span>
-          <span className="text-lg font-bold text-white font-mono">-$180.00</span>
+          <span className="text-lg font-bold text-white font-mono">-${settledWithdrawals.toFixed(2)}</span>
         </div>
         <div className="p-4 rounded-2xl bg-[#121326] border border-[#212443]">
           <span className="text-[11px] text-[#787f9f] block">Total Logged Events</span>

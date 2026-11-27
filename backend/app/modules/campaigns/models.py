@@ -8,6 +8,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.db import Base, IdMixin, TimestampMixin
 from app.modules.assets.models import Asset
+from app.modules.campaigns.defaults import DEFAULT_DISPLAY_SECONDS, DEFAULT_MIN_WATCH_PCT
 
 
 class CampaignStatus(enum.StrEnum):
@@ -42,9 +43,9 @@ class Campaign(IdMixin, TimestampMixin, Base):
     budget_spent: Mapped[Decimal] = mapped_column(Numeric(18, 6), default=Decimal("0"))
 
     # Completion requirements used by the verification module
-    min_watch_pct: Mapped[float] = mapped_column(Float, default=0.9)
+    min_watch_pct: Mapped[float] = mapped_column(Float, default=DEFAULT_MIN_WATCH_PCT)
     # Viewing time for image creatives, or when no processed video is attached yet.
-    display_seconds: Mapped[int] = mapped_column(Integer, default=15)
+    display_seconds: Mapped[int] = mapped_column(Integer, default=DEFAULT_DISPLAY_SECONDS)
     requires_feedback: Mapped[bool] = mapped_column(Boolean, default=False)
     rating_prompt: Mapped[str] = mapped_column(String(300))
     question: Mapped[str] = mapped_column(String(300))

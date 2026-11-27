@@ -24,12 +24,32 @@ export const OverviewTab: React.FC = () => {
     dailyTotalQuota, 
     tasks, 
     activities, 
-    setActiveTab 
+    setActiveTab,
+    dailyTrend,
+    rewardPerTask,
+    referrals,
+    isLoading,
   } = useDashboard();
 
   const remainingTasks = Math.max(0, dailyTotalQuota - completedToday);
-  const progressPercent = Math.min(100, Math.round((completedToday / dailyTotalQuota) * 100));
-  const availableTask = tasks.find(t => t.status === 'available') || tasks[0];
+  const progressPercent = dailyTotalQuota ? Math.min(100, Math.round((completedToday / dailyTotalQuota) * 100)) : 0;
+  const availableTask = tasks.find(t => t.status === 'available') ?? null;
+
+  // Last 7 days of verified rewards from the server (days without activity count as zero).
+  const week = Array.from({ length: 7 }, (_, i) => {
+    const d = new Date();
+    d.setUTCDate(d.getUTCDate() - (6 - i));
+    const key = d.toISOString().slice(0, 10);
+    return {
+      key,
+      label: i === 6 ? 'Today' : d.toLocaleDateString(undefined, { weekday: 'short', timeZone: 'UTC' }),
+      rewards: dailyTrend.find((x) => x.day === key)?.rewards ?? 0,
+    };
+  });
+  const weekTotal = week.reduce((sum, d) => sum + d.rewards, 0);
+  const maxReward = Math.max(1, ...week.map((d) => d.rewards));
+  const chartPoints = week.map((d, i) => ({ x: (i / 6) * 400, y: 110 - (d.rewards / maxReward) * 90, ...d }));
+  const linePoints = chartPoints.map((p) => `${p.x},${p.y}`).join(' ');
 
   return (
     <div className="space-y-8 animate-fade-in">
@@ -151,7 +171,7 @@ export const OverviewTab: React.FC = () => {
             +${totalReferralBonus.toFixed(2)}
           </div>
           <div className="flex items-center justify-between text-[11px] pt-2 border-t border-[#1d203d]">
-            <span className="text-[#72799c]">6 active members</span>
+            <span className="text-[#72799c]">{referrals.length} members (preview data)</span>
             <button
               onClick={() => setActiveTab('network')}
               className="text-sky-400 hover:text-white font-semibold flex items-center gap-0.5"
@@ -175,69 +195,35 @@ export const OverviewTab: React.FC = () => {
               <p className="text-xs text-[#7e85a6]">Daily verified attention rewards (USDT)</p>
             </div>
             <span className="text-xs font-mono text-emerald-400 bg-emerald-950/50 border border-emerald-800/40 px-2.5 py-1 rounded-full">
-              +14.2% this week
+              ${weekTotal.toFixed(2)} this week
             </span>
           </div>
 
-          {/* SVG Visual Area Chart */}
+          {/* SVG Visual Area Chart (verified rewards per day, from the server) */}
           <div className="h-44 w-full relative pt-2">
-            <svg className="w-full h-full overflow-visible" viewBox="0 0 400 130">
+            <svg className="w-full h-full overflow-visible" viewBox="0 0 400 130" role="img" aria-label="Verified rewards over the last 7 days">
               <defs>
                 <linearGradient id="areaGrad" x1="0" y1="0" x2="0" y2="1">
                   <stop offset="0%" stopColor="#7852fc" stopOpacity="0.4" />
                   <stop offset="100%" stopColor="#7852fc" stopOpacity="0.0" />
                 </linearGradient>
               </defs>
-              {/* Grid Lines */}
               <line x1="0" y1="20" x2="400" y2="20" stroke="#1d203a" strokeDasharray="3 3" />
               <line x1="0" y1="60" x2="400" y2="60" stroke="#1d203a" strokeDasharray="3 3" />
               <line x1="0" y1="100" x2="400" y2="100" stroke="#1d203a" strokeDasharray="3 3" />
-
-              {/* Area */}
-              <polygon
-                fill="url(#areaGrad)"
-                points="0,110 50,90 110,95 180,60 250,75 320,35 400,20 400,120 0,120"
-              />
-
-              {/* Line */}
-              <polyline
-                fill="none"
-                stroke="#8d6cff"
-                strokeWidth="2.5"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                points="0,110 50,90 110,95 180,60 250,75 320,35 400,20"
-              />
-
-              {/* Data points */}
-              {[
-                { cx: 0, cy: 110, val: '$8' },
-                { cx: 50, cy: 90, val: '$10' },
-                { cx: 110, cy: 95, val: '$9.5' },
-                { cx: 180, cy: 60, val: '$13' },
-                { cx: 250, cy: 75, val: '$11.5' },
-                { cx: 320, cy: 35, val: '$14' },
-                { cx: 400, cy: 20, val: '$15' },
-              ].map((pt, i) => (
-                <circle
-                  key={i}
-                  cx={pt.cx}
-                  cy={pt.cy}
-                  r="4"
-                  className="fill-[#121326] stroke-[#c0abff] stroke-2"
-                />
+              <polygon fill="url(#areaGrad)" points={`0,120 ${linePoints} 400,120`} />
+              <polyline fill="none" stroke="#8d6cff" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" points={linePoints} />
+              {chartPoints.map((pt) => (
+                <circle key={pt.key} cx={pt.x} cy={pt.y} r="4" className="fill-[#121326] stroke-[#c0abff] stroke-2">
+                  <title>{`${pt.label}: $${pt.rewards.toFixed(2)}`}</title>
+                </circle>
               ))}
             </svg>
 
-            {/* Days labels */}
             <div className="flex justify-between text-[11px] text-[#6d7496] font-mono mt-2">
-              <span>Mon</span>
-              <span>Tue</span>
-              <span>Wed</span>
-              <span>Thu</span>
-              <span>Fri</span>
-              <span>Sat</span>
-              <span className="text-[#a488ff] font-bold">Today (Sun)</span>
+              {week.map((d, i) => (
+                <span key={d.key} className={i === 6 ? 'text-[#a488ff] font-bold' : ''}>{d.label}</span>
+              ))}
             </div>
           </div>
 
@@ -256,8 +242,10 @@ export const OverviewTab: React.FC = () => {
               />
             </div>
             <div className="flex justify-between text-[11px] text-[#71789c]">
-              <span>Tier: Growth (30 tasks/day)</span>
-              <span>Estimated yield upon completion: $15.00</span>
+              <span>
+                {userProfile.tier === 'none' ? 'No active package' : `Package: ${userProfile.tier.toUpperCase()} (${dailyTotalQuota} tasks/day)`}
+              </span>
+              <span>Remaining potential today: ${(remainingTasks * rewardPerTask).toFixed(2)}</span>
             </div>
           </div>
         </div>
@@ -265,39 +253,47 @@ export const OverviewTab: React.FC = () => {
         {/* Right: Next Queued Task & Quick Actions (5 cols) */}
         <div className="lg:col-span-5 space-y-6">
           {/* Spotlight Task */}
+          {availableTask ? (
           <div className="rounded-3xl bg-[#121326] border border-[#272b50] p-6 shadow-xl relative overflow-hidden">
-            <div className="flex items-center justify-between mb-3">
-              <span className="text-[11px] font-bold text-[#a68aff] uppercase tracking-wider bg-[#201b44] px-2.5 py-0.5 rounded border border-[#3e317d]">
-                Next Task in Queue
-              </span>
-              <span className="text-xs font-mono font-bold text-emerald-400">
-                +${availableTask.reward.toFixed(2)} USDT
-              </span>
+              <div className="flex items-center justify-between mb-3">
+                <span className="text-[11px] font-bold text-[#a68aff] uppercase tracking-wider bg-[#201b44] px-2.5 py-0.5 rounded border border-[#3e317d]">
+                  Next Task in Queue
+                </span>
+                <span className="text-xs font-mono font-bold text-emerald-400">
+                  +${availableTask.reward.toFixed(2)} USDT
+                </span>
+              </div>
+  
+              <h3 className="text-base font-bold text-white mb-1.5">
+                {availableTask.title}
+              </h3>
+              <p className="text-xs text-[#8a91b4] leading-relaxed mb-4 line-clamp-2">
+                {availableTask.description}
+              </p>
+  
+              <div className="flex items-center gap-4 text-xs text-[#717899] mb-5">
+                <span className="flex items-center gap-1">
+                  <Clock className="w-3.5 h-3.5 text-[#9a7ffd]" /> {availableTask.durationSeconds}s viewing
+                </span>
+                <span>•</span>
+                <span className="text-[#a4abcb]">{availableTask.category}</span>
+              </div>
+  
+              <button
+                onClick={() => setActiveTab('tasks')}
+                className="w-full py-3 rounded-xl bg-gradient-to-r from-[#6b45f6] to-[#8f6dff] hover:from-[#7651fc] hover:to-[#9f80ff] text-white text-xs font-bold transition-all shadow-md shadow-[#734eff]/30 flex items-center justify-center gap-2 cursor-pointer"
+              >
+                <span>Engage & Claim Reward</span>
+                <ArrowUpRight className="w-4 h-4" />
+              </button>
             </div>
-
-            <h3 className="text-base font-bold text-white mb-1.5">
-              {availableTask.title}
-            </h3>
-            <p className="text-xs text-[#8a91b4] leading-relaxed mb-4 line-clamp-2">
-              {availableTask.description}
-            </p>
-
-            <div className="flex items-center gap-4 text-xs text-[#717899] mb-5">
-              <span className="flex items-center gap-1">
-                <Clock className="w-3.5 h-3.5 text-[#9a7ffd]" /> {availableTask.durationSeconds}s duration
-              </span>
-              <span>•</span>
-              <span className="text-[#a4abcb]">{availableTask.category}</span>
+          ) : (
+            <div className="rounded-3xl bg-[#121326] border border-[#272b50] p-6 shadow-xl text-xs text-[#8a91b4] space-y-3">
+              <span className="text-[11px] font-bold text-[#a68aff] uppercase tracking-wider">Next Task in Queue</span>
+              <p>{isLoading ? 'Loading tasks…' : tasks.length ? 'You have completed every available task today. New ones appear tomorrow.' : 'No sponsored tasks are available right now.'}</p>
+              <button onClick={() => setActiveTab('tasks')} className="text-[#a488ff] hover:text-white font-semibold cursor-pointer">Open tasks</button>
             </div>
-
-            <button
-              onClick={() => setActiveTab('tasks')}
-              className="w-full py-3 rounded-xl bg-gradient-to-r from-[#6b45f6] to-[#8f6dff] hover:from-[#7651fc] hover:to-[#9f80ff] text-white text-xs font-bold transition-all shadow-md shadow-[#734eff]/30 flex items-center justify-center gap-2 cursor-pointer"
-            >
-              <span>Engage & Claim Reward</span>
-              <ArrowUpRight className="w-4 h-4" />
-            </button>
-          </div>
+          )}
 
           {/* Institutional Compliance Notice */}
           <div className="p-4 rounded-2xl bg-[#0f1020] border border-[#20233e] flex items-start gap-3">

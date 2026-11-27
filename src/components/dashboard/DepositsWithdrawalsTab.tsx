@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { 
   ArrowUpCircle, 
   ArrowDownCircle, 
@@ -15,42 +15,59 @@ import {
   ListOrdered
 } from 'lucide-react';
 import { useDashboard } from '../../context/DashboardContext';
-import { PACKAGE_TIERS } from '../../data/content';
+import { ApiNetwork } from '../../lib/api';
 
 export const DepositsWithdrawalsTab: React.FC = () => {
   const { 
     userProfile, 
     availableBalance, 
-    pendingWithdrawal, 
     withdrawals, 
     deposits, 
     requestWithdrawal, 
-    submitDeposit 
+    packages,
+    pendingDeposit,
+    createDeposit,
+    simulateDeposit,
+    canSimulateDeposits,
+    minWithdrawal,
+    withdrawalFeeRate: feeRate,
+    hasActivePackage,
+    refresh,
   } = useDashboard();
 
   const [subTab, setSubTab] = useState<'withdraw' | 'deposit' | 'ledger'>('withdraw');
 
   // Withdrawal form state
-  const [withdrawAmount, setWithdrawAmount] = useState<string>('50');
-  const [withdrawNetwork, setWithdrawNetwork] = useState<'TRC-20' | 'ERC-20' | 'POLYGON'>('TRC-20');
+  const [withdrawAmount, setWithdrawAmount] = useState<string>('');
+  const [withdrawNetwork, setWithdrawNetwork] = useState<ApiNetwork>('TRC-20');
   const [withdrawAddress, setWithdrawAddress] = useState<string>(userProfile.walletWhitelist.trc20);
   const [feedbackMsg, setFeedbackMsg] = useState<{ type: 'error' | 'success'; text: string } | null>(null);
+  const [submittingWithdrawal, setSubmittingWithdrawal] = useState(false);
 
   // Deposit state
-  const [depositTier, setDepositTier] = useState<'starter' | 'growth' | 'pro'>(userProfile.tier);
-  const [depositNetwork, setDepositNetwork] = useState<'TRC-20' | 'ERC-20' | 'POLYGON'>('TRC-20');
+  const [depositPackageId, setDepositPackageId] = useState<string>('');
+  const [depositNetwork, setDepositNetwork] = useState<ApiNetwork>('TRC-20');
   const [copiedAddress, setCopiedAddress] = useState<boolean>(false);
   const [showQr, setShowQr] = useState<boolean>(false);
-  const [simulatingDeposit, setSimulatingDeposit] = useState<boolean>(false);
+  const [depositBusy, setDepositBusy] = useState<boolean>(false);
+  const [depositError, setDepositError] = useState<string | null>(null);
 
-  const depositAddresses = {
-    'TRC-20': 'TPyM8c7h4aL89QhZk2u8vX5yNmW0eR1t3p',
-    'ERC-20': '0x7A4b9e28D5b4C17983FcAf86c7104d4D8A92F4c8',
-    'POLYGON': '0x3D88f219Cb0e14a7904EcB589d1b64c010A56E21',
-  };
+  // Default to the package the participant already has, else the first one on offer.
+  useEffect(() => {
+    if (!depositPackageId && packages.length) {
+      setDepositPackageId((packages.find((p) => p.code === userProfile.tier) ?? packages[0]).id);
+    }
+  }, [packages, userProfile.tier, depositPackageId]);
 
-  const minWithdrawal = userProfile.tier === 'starter' ? 10 : userProfile.tier === 'growth' ? 25 : 50;
-  const feeRate = userProfile.tier === 'starter' ? 0.02 : userProfile.tier === 'growth' ? 0.015 : 0.01;
+  // The server confirms deposits in the background; keep the open deposit fresh.
+  useEffect(() => {
+    if (!pendingDeposit) return;
+    const t = setInterval(() => void refresh(), 15000);
+    return () => clearInterval(t);
+  }, [pendingDeposit?.id, refresh]);
+
+  const walletFor = (net: ApiNetwork) =>
+    net === 'TRC-20' ? userProfile.walletWhitelist.trc20 : net === 'ERC-20' ? userProfile.walletWhitelist.erc20 : userProfile.walletWhitelist.polygon;
 
   const calculateFee = () => {
     const val = parseFloat(withdrawAmount) || 0;
@@ -64,42 +81,50 @@ export const DepositsWithdrawalsTab: React.FC = () => {
   };
 
   const handleCopy = () => {
-    navigator.clipboard.writeText(depositAddresses[depositNetwork]);
+    if (!pendingDeposit) return;
+    navigator.clipboard.writeText(pendingDeposit.address);
     setCopiedAddress(true);
     setTimeout(() => setCopiedAddress(false), 2000);
   };
 
-  const handleNetworkChange = (net: 'TRC-20' | 'ERC-20' | 'POLYGON') => {
+  const handleNetworkChange = (net: ApiNetwork) => {
     setWithdrawNetwork(net);
-    if (net === 'TRC-20') setWithdrawAddress(userProfile.walletWhitelist.trc20);
-    if (net === 'ERC-20') setWithdrawAddress(userProfile.walletWhitelist.erc20);
-    if (net === 'POLYGON') setWithdrawAddress(userProfile.walletWhitelist.polygon);
+    setWithdrawAddress(walletFor(net));
   };
 
-  const handleSubmitWithdrawal = (e: React.FormEvent) => {
+  const handleSubmitWithdrawal = async (e: React.FormEvent) => {
     e.preventDefault();
     setFeedbackMsg(null);
+    setSubmittingWithdrawal(true);
+    const res = await requestWithdrawal(parseFloat(withdrawAmount) || 0, withdrawNetwork, withdrawAddress);
+    setSubmittingWithdrawal(false);
+    setFeedbackMsg({ type: res.success ? 'success' : 'error', text: res.message });
+    if (res.success) setWithdrawAmount('');
+  };
 
-    const val = parseFloat(withdrawAmount) || 0;
-    const res = requestWithdrawal(val, withdrawNetwork, withdrawAddress);
-
-    if (res.success) {
-      setFeedbackMsg({ type: 'success', text: res.message });
-      setWithdrawAmount('');
-    } else {
-      setFeedbackMsg({ type: 'error', text: res.message });
+  const handleCreateDeposit = async () => {
+    setDepositBusy(true);
+    setDepositError(null);
+    try {
+      await createDeposit(depositPackageId, depositNetwork);
+    } catch (e) {
+      setDepositError(e instanceof Error ? e.message : 'Could not create a deposit address.');
+    } finally {
+      setDepositBusy(false);
     }
   };
 
-  const handleSimulateDeposit = () => {
-    setSimulatingDeposit(true);
-    const selectedPkg = PACKAGE_TIERS.find(p => p.id === depositTier);
-    const amount = selectedPkg ? selectedPkg.price : 100;
-
-    setTimeout(() => {
-      submitDeposit(amount, depositNetwork, depositTier);
-      setSimulatingDeposit(false);
-    }, 1500);
+  const handleSimulateDeposit = async () => {
+    if (!pendingDeposit) return;
+    setDepositBusy(true);
+    setDepositError(null);
+    try {
+      await simulateDeposit(pendingDeposit);
+    } catch (e) {
+      setDepositError(e instanceof Error ? e.message : 'Simulation is not available here.');
+    } finally {
+      setDepositBusy(false);
+    }
   };
 
   return (
@@ -164,7 +189,7 @@ export const DepositsWithdrawalsTab: React.FC = () => {
                   Request Settlement
                 </span>
                 <span className="text-[11px] text-[#71789c]">
-                  Minimum threshold: ${minWithdrawal}.00 USDT
+                  Minimum threshold: ${minWithdrawal.toFixed(2)} USDT
                 </span>
               </div>
               <div className="text-right">
@@ -217,7 +242,7 @@ export const DepositsWithdrawalsTab: React.FC = () => {
                     <button
                       key={net.id}
                       type="button"
-                      onClick={() => handleNetworkChange(net.id as any)}
+                      onClick={() => handleNetworkChange(net.id as ApiNetwork)}
                       className={`p-2.5 rounded-xl border text-left transition-all cursor-pointer ${
                         withdrawNetwork === net.id
                           ? 'bg-[#251f50] border-[#7d5efc] text-white shadow-md'
@@ -237,9 +262,11 @@ export const DepositsWithdrawalsTab: React.FC = () => {
                   <label className="text-xs font-semibold text-[#8f96b9]">
                     Destination {withdrawNetwork} Address:
                   </label>
-                  <span className="text-[10px] text-emerald-400 flex items-center gap-1">
-                    <ShieldCheck className="w-3 h-3" /> Whitelisted
-                  </span>
+                  {withdrawAddress && withdrawAddress === walletFor(withdrawNetwork) && (
+                    <span className="text-[10px] text-emerald-400 flex items-center gap-1">
+                      <ShieldCheck className="w-3 h-3" /> Saved address
+                    </span>
+                  )}
                 </div>
                 <input
                   type="text"
@@ -247,14 +274,14 @@ export const DepositsWithdrawalsTab: React.FC = () => {
                   value={withdrawAddress}
                   onChange={(e) => setWithdrawAddress(e.target.value)}
                   className="w-full bg-[#0b0c16] border border-[#242747] rounded-xl py-2.5 px-3 text-white text-xs font-mono focus:border-[#7c5cfc] outline-none"
-                  placeholder="Enter or confirm whitelisted address"
+                  placeholder="Enter your payout address"
                 />
               </div>
 
               {/* Fee Breakdown Calculation */}
               <div className="p-4 rounded-2xl bg-[#0b0c16] border border-[#1e213d] text-xs space-y-2">
                 <div className="flex justify-between text-[#8288a7]">
-                  <span>{userProfile.tier.toUpperCase()} Platform Fee ({(feeRate * 100).toFixed(1)}%):</span>
+                  <span>{userProfile.tier === 'none' ? 'Platform' : userProfile.tier.toUpperCase()} Fee ({(feeRate * 100).toFixed(1)}%):</span>
                   <span className="font-mono text-white">${calculateFee()} USDT</span>
                 </div>
                 <div className="flex justify-between text-[#8288a7]">
@@ -280,10 +307,10 @@ export const DepositsWithdrawalsTab: React.FC = () => {
 
               <button
                 type="submit"
-                disabled={availableBalance < minWithdrawal}
+                disabled={submittingWithdrawal || !hasActivePackage || availableBalance < minWithdrawal}
                 className="w-full py-3.5 rounded-full bg-gradient-to-r from-[#6b45f6] to-[#8f6dff] hover:from-[#7651fc] hover:to-[#9f80ff] text-white text-xs font-bold tracking-wide transition-all shadow-md shadow-[#734eff]/30 flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
               >
-                <span>Request Payout of ${calculateNet()} USDT</span>
+                <span>{submittingWithdrawal ? 'Submitting…' : `Request Payout of $${calculateNet()} USDT`}</span>
                 <ArrowRight className="w-4 h-4" />
               </button>
             </form>
@@ -292,7 +319,7 @@ export const DepositsWithdrawalsTab: React.FC = () => {
           {/* Right: Active In-Flight Tracking & Conditions (5 cols) */}
           <div className="lg:col-span-5 space-y-6">
             {/* Live Active Withdrawal Card */}
-            {withdrawals.length > 0 && withdrawals[0].status !== 'completed' ? (
+            {withdrawals.length > 0 && withdrawals[0].status === 'verifying' ? (
               <div className="rounded-3xl bg-[#121326] border border-[#2b2e55] p-6 shadow-xl space-y-4">
                 <div className="flex items-center justify-between">
                   <span className="text-xs font-bold uppercase tracking-wider text-white">
@@ -372,134 +399,139 @@ export const DepositsWithdrawalsTab: React.FC = () => {
           <div className="lg:col-span-7 rounded-3xl bg-[#121326] border border-[#262a4d] p-6 sm:p-8 shadow-xl space-y-6">
             <div>
               <span className="text-xs font-bold uppercase tracking-wider text-white block mb-1">
-                Fund Treasury / Upgrade Package Quota
+                Activate or Upgrade a Participation Package
               </span>
               <p className="text-xs text-[#7e85a6]">
-                Transmitting cryptocurrency to your isolated deposit address immediately adjusts your daily task quota and fee tier.
+                Each deposit address is unique to one package purchase. Once the transfer is confirmed, the package and its daily task quota activate automatically.
               </p>
             </div>
 
-            {/* Package Selection */}
-            <div>
-              <label className="text-xs font-semibold text-[#8f96b9] block mb-2">
-                Select Desired Package Quota:
-              </label>
-              <div className="grid grid-cols-3 gap-3">
-                {PACKAGE_TIERS.map((tier) => (
-                  <button
-                    key={tier.id}
-                    type="button"
-                    onClick={() => setDepositTier(tier.id)}
-                    className={`p-3.5 rounded-2xl border text-left transition-all cursor-pointer ${
-                      depositTier === tier.id
-                        ? 'bg-[#251f50] border-[#7d5efc] text-white shadow-lg'
-                        : 'bg-[#0e0f1e] border-[#1f223d] text-[#71789c] hover:text-white'
-                    }`}
-                  >
-                    <span className="text-xs font-bold block">{tier.name}</span>
-                    <span className="text-base font-extrabold font-mono text-white block my-0.5">
-                      ${tier.price}
-                    </span>
-                    <span className="text-[10px] text-[#a488ff] block">
-                      {tier.activitiesPerDay} Tasks / day
-                    </span>
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {/* Network Selector */}
-            <div>
-              <label className="text-xs font-semibold text-[#8f96b9] block mb-2">
-                Select Blockchain Rail:
-              </label>
-              <div className="grid grid-cols-3 gap-2">
-                {(['TRC-20', 'ERC-20', 'POLYGON'] as const).map((net) => (
-                  <button
-                    key={net}
-                    type="button"
-                    onClick={() => setDepositNetwork(net)}
-                    className={`p-2.5 rounded-xl border text-left transition-all cursor-pointer ${
-                      depositNetwork === net
-                        ? 'bg-[#251f50] border-[#7d5efc] text-white'
-                        : 'bg-[#0e0f1e] border-[#1f223d] text-[#71789c] hover:text-white'
-                    }`}
-                  >
-                    <span className="text-xs font-bold block">{net}</span>
-                    <span className="text-[10px] text-[#a488ff] block">
-                      {net === 'TRC-20' ? 'Lowest Fees' : net === 'ERC-20' ? 'Ethereum' : 'Fast Polygon'}
-                    </span>
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {/* Address Box */}
-            <div className="p-4 rounded-2xl bg-[#0b0c16] border border-[#212440]">
-              <div className="flex items-center justify-between mb-1.5">
-                <span className="text-xs font-semibold text-[#888fae]">
-                  Isolated Deposit Address ({depositNetwork}):
-                </span>
-                <span className="text-[10px] text-emerald-400 font-mono flex items-center gap-1">
-                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                  Validator Ready
-                </span>
-              </div>
-              <div className="font-mono text-xs text-white break-all p-3 bg-[#141527] rounded-xl border border-[#242747] mb-3 select-all">
-                {depositAddresses[depositNetwork]}
-              </div>
-
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={handleCopy}
-                  className="flex-1 py-2 px-3 rounded-lg bg-[#1e203c] hover:bg-[#2b2e54] text-xs font-semibold text-white border border-[#31355c] transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
-                >
-                  {copiedAddress ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
-                  <span>{copiedAddress ? 'Copied to Clipboard!' : 'Copy Deposit Address'}</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setShowQr(!showQr)}
-                  className="py-2 px-4 rounded-lg bg-[#1e203c] hover:bg-[#2b2e54] text-xs font-semibold text-white border border-[#31355c] transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
-                >
-                  <QrCode className="w-3.5 h-3.5 text-[#9a7ffd]" />
-                  <span>{showQr ? 'Hide QR' : 'Show QR'}</span>
-                </button>
-              </div>
-
-              {showQr && (
-                <div className="mt-4 p-4 bg-white rounded-2xl text-center max-w-[190px] mx-auto animate-fade-in">
-                  <div className="w-32 h-32 mx-auto bg-neutral-900 flex items-center justify-center rounded-xl p-2 text-white text-[10px] font-mono text-center">
-                    [QR: {depositNetwork}]
-                  </div>
-                  <span className="text-[10px] text-neutral-600 block mt-2 font-mono">
-                    Scan via Mobile Wallet
+            {pendingDeposit ? (
+              <div className="p-4 rounded-2xl bg-[#0b0c16] border border-[#212440] space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-semibold text-[#888fae]">
+                    Send exactly ${Number(pendingDeposit.expected_amount).toFixed(2)} {pendingDeposit.asset} on {pendingDeposit.network}
+                  </span>
+                  <span className="text-[10px] text-amber-300 font-mono flex items-center gap-1">
+                    <RefreshCw className="w-3 h-3 animate-spin" />
+                    {pendingDeposit.status === 'pending'
+                      ? `${pendingDeposit.confirmations}/${pendingDeposit.required_confirmations} confirmations`
+                      : 'Awaiting payment'}
                   </span>
                 </div>
-              )}
-            </div>
-
-            {/* Test Simulation Button */}
-            <div className="pt-2 border-t border-[#1d203a] flex flex-col sm:flex-row items-center justify-between gap-3">
-              <span className="text-[11px] text-[#71789c]">
-                Testing environment simulation trigger:
-              </span>
-              <button
-                type="button"
-                onClick={handleSimulateDeposit}
-                disabled={simulatingDeposit}
-                className="w-full sm:w-auto px-5 py-2.5 rounded-xl bg-[#201c44] hover:bg-[#2e2666] border border-[#48398b] text-xs font-bold text-[#c7b4fd] transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
-              >
-                {simulatingDeposit ? (
-                  <span className="flex items-center gap-1.5">
-                    <RefreshCw className="w-3.5 h-3.5 animate-spin" /> Verifying 12/12 blocks...
-                  </span>
-                ) : (
-                  <span>Simulate Block Receipt & Credit +${depositTier === 'starter' ? 25 : depositTier === 'growth' ? 100 : 500}</span>
+                <div className="font-mono text-xs text-white break-all p-3 bg-[#141527] rounded-xl border border-[#242747] select-all">
+                  {pendingDeposit.address}
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={handleCopy}
+                    className="flex-1 py-2 px-3 rounded-lg bg-[#1e203c] hover:bg-[#2b2e54] text-xs font-semibold text-white border border-[#31355c] transition-colors flex items-center justify-center gap-2 cursor-pointer"
+                  >
+                    {copiedAddress ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+                    <span>{copiedAddress ? 'Copied to Clipboard!' : 'Copy Deposit Address'}</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setShowQr(!showQr)}
+                    className="py-2 px-4 rounded-lg bg-[#1e203c] hover:bg-[#2b2e54] text-xs font-semibold text-white border border-[#31355c] transition-colors flex items-center gap-2 cursor-pointer"
+                  >
+                    <QrCode className="w-3.5 h-3.5 text-[#9a7ffd]" />
+                    <span>{showQr ? 'Hide QR' : 'Show QR'}</span>
+                  </button>
+                </div>
+                {showQr && (
+                  <div className="p-4 bg-white rounded-2xl text-center max-w-[190px] mx-auto animate-fade-in">
+                    <div className="w-32 h-32 mx-auto bg-neutral-900 flex items-center justify-center rounded-xl p-2 text-white text-[10px] font-mono text-center">
+                      [QR: {pendingDeposit.network}]
+                    </div>
+                    <span className="text-[10px] text-neutral-600 block mt-2 font-mono">Scan via Mobile Wallet</span>
+                  </div>
                 )}
-              </button>
-            </div>
+                <p className="text-[11px] text-[#71789c]">
+                  This address expires {new Date(pendingDeposit.expires_at).toLocaleString()}. Status refreshes automatically.
+                </p>
+                {canSimulateDeposits && (
+                  <div className="pt-3 border-t border-[#1d203a] flex flex-col sm:flex-row items-center justify-between gap-3">
+                    <span className="text-[11px] text-[#71789c]">Development only: pretend the transfer was broadcast.</span>
+                    <button
+                      type="button"
+                      onClick={handleSimulateDeposit}
+                      disabled={depositBusy}
+                      className="w-full sm:w-auto px-5 py-2.5 rounded-xl bg-[#201c44] hover:bg-[#2e2666] border border-[#48398b] text-xs font-bold text-[#c7b4fd] transition-all cursor-pointer disabled:opacity-60"
+                    >
+                      {depositBusy ? 'Working…' : `Simulate transfer of $${Number(pendingDeposit.expected_amount).toFixed(2)}`}
+                    </button>
+                  </div>
+                )}
+              </div>
+            ) : (
+              <>
+                {/* Package Selection */}
+                <div>
+                  <label className="text-xs font-semibold text-[#8f96b9] block mb-2">Select package:</label>
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    {packages.map((pkg) => (
+                      <button
+                        key={pkg.id}
+                        type="button"
+                        onClick={() => setDepositPackageId(pkg.id)}
+                        className={`p-3.5 rounded-2xl border text-left transition-all cursor-pointer ${
+                          depositPackageId === pkg.id
+                            ? 'bg-[#251f50] border-[#7d5efc] text-white shadow-lg'
+                            : 'bg-[#0e0f1e] border-[#1f223d] text-[#71789c] hover:text-white'
+                        }`}
+                      >
+                        <span className="text-xs font-bold block">
+                          {pkg.name} {pkg.code === userProfile.tier && <span className="text-emerald-400">(current)</span>}
+                        </span>
+                        <span className="text-base font-extrabold font-mono text-white block my-0.5">${Number(pkg.price).toFixed(0)}</span>
+                        <span className="text-[10px] text-[#a488ff] block">{pkg.daily_quota} tasks / day</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Network Selector */}
+                <div>
+                  <label className="text-xs font-semibold text-[#8f96b9] block mb-2">Select blockchain rail:</label>
+                  <div className="grid grid-cols-3 gap-2">
+                    {([['TRC-20', 'USDT · Lowest fees'], ['ERC-20', 'USDT · Ethereum'], ['POLYGON', 'USDC · Polygon']] as const).map(([net, sub]) => (
+                      <button
+                        key={net}
+                        type="button"
+                        onClick={() => setDepositNetwork(net)}
+                        className={`p-2.5 rounded-xl border text-left transition-all cursor-pointer ${
+                          depositNetwork === net
+                            ? 'bg-[#251f50] border-[#7d5efc] text-white'
+                            : 'bg-[#0e0f1e] border-[#1f223d] text-[#71789c] hover:text-white'
+                        }`}
+                      >
+                        <span className="text-xs font-bold block">{net}</span>
+                        <span className="text-[10px] text-[#a488ff] block">{sub}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={handleCreateDeposit}
+                  disabled={depositBusy || !depositPackageId}
+                  className="w-full py-3.5 rounded-full bg-gradient-to-r from-[#6b45f6] to-[#8f6dff] hover:from-[#7651fc] hover:to-[#9f80ff] text-white text-xs font-bold tracking-wide transition-all shadow-md shadow-[#734eff]/30 flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
+                >
+                  <span>{depositBusy ? 'Generating…' : 'Generate my deposit address'}</span>
+                  <ArrowRight className="w-4 h-4" />
+                </button>
+              </>
+            )}
+
+            {depositError && (
+              <div role="alert" className="p-3 rounded-xl bg-rose-950/50 border border-rose-800 text-rose-300 text-xs flex items-center gap-2">
+                <AlertTriangle className="w-4 h-4 shrink-0" />
+                <span>{depositError}</span>
+              </div>
+            )}
           </div>
 
           {/* Right: Confirmation Status & Instructions (5 cols) */}
@@ -511,7 +543,7 @@ export const DepositsWithdrawalsTab: React.FC = () => {
                   { step: '1', title: 'Transmit from wallet', desc: 'Transfer exact amount to the specified receiving address.' },
                   { step: '2', title: 'Mempool detection', desc: 'Node listeners detect transaction broadcast within 5–15 seconds.' },
                   { step: '3', title: '12 Confirmations', desc: 'Immutable ledger finality achieved across blockchain nodes.' },
-                  { step: '4', title: 'Instant tier quota credit', desc: 'Account balance & daily tasks quota unlocked automatically.' },
+                  { step: '4', title: 'Package activated', desc: 'Your daily task quota unlocks automatically once the deposit is confirmed.' },
                 ].map((s) => (
                   <div key={s.step} className="flex items-start gap-3 text-xs">
                     <div className="w-6 h-6 rounded-full bg-[#1e1c3c] text-[#a488ff] font-bold flex items-center justify-center shrink-0 border border-[#343063]">
@@ -582,7 +614,9 @@ export const DepositsWithdrawalsTab: React.FC = () => {
                       <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold capitalize ${
                         w.status === 'completed'
                           ? 'bg-emerald-950/60 text-emerald-400 border border-emerald-800/40'
-                          : 'bg-amber-950/60 text-amber-300 border border-amber-800/40'
+                          : w.status === 'rejected'
+                            ? 'bg-rose-950/60 text-rose-300 border border-rose-800/40'
+                            : 'bg-amber-950/60 text-amber-300 border border-amber-800/40'
                       }`}>
                         {w.status === 'verifying' && <RefreshCw className="w-2.5 h-2.5 animate-spin" />}
                         {w.status}
@@ -602,10 +636,16 @@ export const DepositsWithdrawalsTab: React.FC = () => {
                     <td className="py-3.5 font-mono text-white font-semibold">#{d.id}</td>
                     <td className="py-3.5 text-[#8c94b7]">{d.network}</td>
                     <td className="py-3.5 font-mono text-white">${d.amount.toFixed(2)}</td>
-                    <td className="py-3.5 font-mono text-emerald-400 font-semibold">+${d.amount.toFixed(2)}</td>
+                    <td className="py-3.5 font-mono text-emerald-400 font-semibold">${d.amount.toFixed(2)}</td>
                     <td className="py-3.5 text-[#72799c]">{d.timestamp}</td>
                     <td className="py-3.5 text-right">
-                      <span className="px-2 py-0.5 rounded bg-emerald-950/60 text-emerald-400 border border-emerald-800/40 text-[10px] font-bold capitalize">
+                      <span className={`px-2 py-0.5 rounded text-[10px] font-bold capitalize border ${
+                        d.status === 'confirmed'
+                          ? 'bg-emerald-950/60 text-emerald-400 border-emerald-800/40'
+                          : d.status === 'expired' || d.status === 'failed'
+                            ? 'bg-rose-950/60 text-rose-300 border-rose-800/40'
+                            : 'bg-amber-950/60 text-amber-300 border-amber-800/40'
+                      }`}>
                         {d.status}
                       </span>
                     </td>
